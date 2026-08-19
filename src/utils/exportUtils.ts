@@ -73,6 +73,16 @@ export function exportToExcel(
   const wb = XLSX.utils.book_new();
   const dateStr = new Date().toISOString().split('T')[0];
 
+  const safeAppendSheet = (workbook: XLSX.WorkBook, sheet: XLSX.WorkSheet, rawName: string) => {
+    // Excel sheet limit is strictly 31 characters, remove forbidden characters \ / ? * [ ] :
+    const cleanName = (rawName || 'Sheet')
+      .replace(/[\\/?*[\]:]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 25);
+    XLSX.utils.book_append_sheet(workbook, sheet, cleanName);
+  };
+
   // Sheet 1: All Stations Summary
   const summaryRows = regions.map((reg, index) => {
     const data = rainfallDataMap[reg.id];
@@ -100,13 +110,15 @@ export function exportToExcel(
     };
   });
 
+  // Sheet 1: All Stations Summary
   const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
-  XLSX.utils.book_append_sheet(wb, wsSummary, 'Ringkasan Seluruh Wilayah');
+  safeAppendSheet(wb, wsSummary, 'Ringkasan Stasiun');
 
   // Sheet 2: Selected Region Hourly History
-  if (selectedRegion && selectedData && selectedData.hourlyHistory.length > 0) {
+  if (selectedRegion && selectedData && selectedData.hourlyHistory && selectedData.hourlyHistory.length > 0) {
     const hourlyRows = selectedData.hourlyHistory.map((h, i) => ({
       No: i + 1,
+      Wilayah: selectedRegion.name,
       'Waktu (Jam)': h.time,
       'Curah Hujan (mm)': h.rainfall,
       'Probabilitas Hujan (%)': h.precipitationProb,
@@ -116,13 +128,14 @@ export function exportToExcel(
       'Kecepatan Angin (km/jam)': h.windSpeed,
     }));
     const wsHourly = XLSX.utils.json_to_sheet(hourlyRows);
-    XLSX.utils.book_append_sheet(wb, wsHourly, `Historis 24 Jam - ${selectedRegion.name.slice(0, 20)}`);
+    safeAppendSheet(wb, wsHourly, 'Historis 24 Jam');
   }
 
   // Sheet 3: Selected Region 7-day Forecast
-  if (selectedRegion && selectedData && selectedData.dailyForecast.length > 0) {
+  if (selectedRegion && selectedData && selectedData.dailyForecast && selectedData.dailyForecast.length > 0) {
     const dailyRows = selectedData.dailyForecast.map((d, i) => ({
       No: i + 1,
+      Wilayah: selectedRegion.name,
       Hari: d.dayName,
       Tanggal: d.date,
       'Total Curah Hujan (mm)': d.rainfallSum,
@@ -132,7 +145,7 @@ export function exportToExcel(
       'Prediksi Cuaca': d.weatherDescription,
     }));
     const wsDaily = XLSX.utils.json_to_sheet(dailyRows);
-    XLSX.utils.book_append_sheet(wb, wsDaily, `Prakiraan 7 Hari - ${selectedRegion.name.slice(0, 20)}`);
+    safeAppendSheet(wb, wsDaily, 'Prakiraan 7 Hari');
   }
 
   // Trigger download with Blob & ObjectURL for iframe & browser compatibility
