@@ -1,6 +1,10 @@
 {
   "name": "HujanNusantara - Pantauan Curah Hujan Real-Time",
   "description": "Aplikasi pemantauan data curah hujan real-time di seluruh wilayah Indonesia dengan peta interaktif, grafik historis, peringatan dini (EWS), ekspor PDF/Excel, dan pengelolaan lokasi favorit.",
-  "requestFramePermissions": ["geolocation"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

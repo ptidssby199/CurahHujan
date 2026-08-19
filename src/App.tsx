@@ -26,7 +26,8 @@ import {
   Radio,
   Clock,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Smartphone
 } from 'lucide-react';
 
 const LOCAL_STORAGE_KEY_FAVS = 'hujannusantara_favs_v1';
@@ -91,8 +92,32 @@ export default function App() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string>('');
   const [countdown, setCountdown] = useState<number>(90);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstallable, setIsInstallable] = useState<boolean>(false);
 
   const prevAlertCountRef = useRef<number>(0);
+
+  // Listen for PWA BeforeInstallPrompt Event
+  useEffect(() => {
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstallable(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+  }, []);
+
+  const handleInstallPWA = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setIsInstallable(false);
+    }
+    setDeferredPrompt(null);
+  };
 
   // Save Favorites to localStorage
   const handleToggleFavorite = (regionId: string) => {
@@ -267,6 +292,18 @@ export default function App() {
             >
               {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
             </button>
+
+            {/* PWA Install Button */}
+            {isInstallable && (
+              <button
+                onClick={handleInstallPWA}
+                className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-950/80 flex items-center gap-1.5 animate-pulse"
+                title="Pasang aplikasi ini di layar utama HP / Komputer Anda"
+              >
+                <Smartphone className="w-4 h-4" />
+                <span className="hidden sm:inline">Pasang Aplikasi</span>
+              </button>
+            )}
 
             {/* Export Modal Trigger Button */}
             <button

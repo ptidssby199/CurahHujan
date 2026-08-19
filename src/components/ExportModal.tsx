@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Region, LiveRainfallData, EarlyWarningAlert } from '../types';
-import { exportToExcel, exportToPDF } from '../utils/exportUtils';
+import { exportToExcel, exportToCSV, exportToPDF } from '../utils/exportUtils';
 import { 
   FileSpreadsheet, 
   FileText, 
@@ -10,7 +10,9 @@ import {
   Sparkles, 
   Layers, 
   MapPin, 
-  AlertTriangle 
+  AlertTriangle,
+  FileCode,
+  AlertCircle
 } from 'lucide-react';
 
 interface ExportModalProps {
@@ -33,11 +35,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [exportScope, setExportScope] = useState<'all' | 'selected' | 'alerts_only'>('all');
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
   const handleExportExcel = () => {
     setIsExporting(true);
+    setErrorMessage(null);
     try {
       let targetRegions = regions;
       if (exportScope === 'selected') {
@@ -55,10 +59,36 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         selectedRegion,
         rainfallDataMap[selectedRegion.id]
       );
-      setSuccessMessage('File Excel berhasil diunduh!');
+      setSuccessMessage('File Excel (.xlsx) berhasil diunduh!');
       setTimeout(() => setSuccessMessage(null), 3500);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setErrorMessage(`Gagal mengunduh Excel: ${e?.message || 'Terjadi kesalahan sistem'}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportCSV = () => {
+    setIsExporting(true);
+    setErrorMessage(null);
+    try {
+      let targetRegions = regions;
+      if (exportScope === 'selected') {
+        targetRegions = [selectedRegion];
+      } else if (exportScope === 'alerts_only') {
+        targetRegions = regions.filter((r) => {
+          const d = rainfallDataMap[r.id];
+          return d && d.alertSeverity !== 'normal';
+        });
+      }
+
+      exportToCSV(targetRegions, rainfallDataMap);
+      setSuccessMessage('File CSV berhasil diunduh!');
+      setTimeout(() => setSuccessMessage(null), 3500);
+    } catch (e: any) {
+      console.error(e);
+      setErrorMessage(`Gagal mengunduh CSV: ${e?.message || 'Terjadi kesalahan'}`);
     } finally {
       setIsExporting(false);
     }
@@ -66,6 +96,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   const handleExportPDF = () => {
     setIsExporting(true);
+    setErrorMessage(null);
     try {
       let targetRegions = regions;
       if (exportScope === 'selected') {
@@ -86,8 +117,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       );
       setSuccessMessage('Laporan PDF resmi berhasil dibuat & diunduh!');
       setTimeout(() => setSuccessMessage(null), 3500);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setErrorMessage(`Gagal membuat PDF: ${e?.message || 'Terjadi kesalahan'}`);
     } finally {
       setIsExporting(false);
     }
@@ -103,7 +135,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-bold text-white">Ekspor Data Curah Hujan</h3>
-              <p className="text-xs text-slate-400">Unduh laporan resmi dalam format Excel atau PDF</p>
+              <p className="text-xs text-slate-400">Unduh laporan resmi dalam format Excel, CSV, atau PDF</p>
             </div>
           </div>
           <button
@@ -168,24 +200,44 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         </div>
 
         {/* Export Buttons */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
           {/* Excel Export Button */}
           <button
             onClick={handleExportExcel}
             disabled={isExporting}
-            className="p-4 rounded-xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/60 to-slate-950 hover:border-emerald-400 text-left transition group shadow-lg"
+            className="p-3.5 rounded-xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/60 to-slate-950 hover:border-emerald-400 text-left transition group shadow-lg"
           >
             <div className="flex items-center justify-between mb-2">
-              <div className="w-9 h-9 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                <FileSpreadsheet className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                <FileSpreadsheet className="w-4 h-4" />
               </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
                 .XLSX
               </span>
             </div>
-            <div className="font-bold text-white text-sm">Unduh Spreadsheet Excel</div>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Multi-sheet data stasiun, historis per jam, & prakiraan 7 hari lengkap.
+            <div className="font-bold text-white text-xs">Spreadsheet Excel</div>
+            <p className="text-[10px] text-slate-400 mt-1">
+              Multi-sheet lengkap historis & prakiraan.
+            </p>
+          </button>
+
+          {/* CSV Export Button */}
+          <button
+            onClick={handleExportCSV}
+            disabled={isExporting}
+            className="p-3.5 rounded-xl border border-teal-500/40 bg-gradient-to-br from-teal-950/60 to-slate-950 hover:border-teal-400 text-left transition group shadow-lg"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="w-8 h-8 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center">
+                <FileCode className="w-4 h-4" />
+              </div>
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal-950 text-teal-300 border border-teal-800">
+                .CSV
+              </span>
+            </div>
+            <div className="font-bold text-white text-xs">Data CSV</div>
+            <p className="text-[10px] text-slate-400 mt-1">
+              Format ringkas untuk analisis cepat.
             </p>
           </button>
 
@@ -193,19 +245,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           <button
             onClick={handleExportPDF}
             disabled={isExporting}
-            className="p-4 rounded-xl border border-rose-500/40 bg-gradient-to-br from-rose-950/60 to-slate-950 hover:border-rose-400 text-left transition group shadow-lg"
+            className="p-3.5 rounded-xl border border-rose-500/40 bg-gradient-to-br from-rose-950/60 to-slate-950 hover:border-rose-400 text-left transition group shadow-lg"
           >
             <div className="flex items-center justify-between mb-2">
-              <div className="w-9 h-9 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center">
-                <FileText className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center">
+                <FileText className="w-4 h-4" />
               </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800">
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800">
                 .PDF
               </span>
             </div>
-            <div className="font-bold text-white text-sm">Unduh Buletin PDF Resmi</div>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Format dokumen BMKG standar lengkap dengan tabel dan status EWS.
+            <div className="font-bold text-white text-xs">Buletin PDF</div>
+            <p className="text-[10px] text-slate-400 mt-1">
+              Dokumen resmi standar BMKG/EWS.
             </p>
           </button>
         </div>
@@ -218,15 +270,24 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </div>
         )}
 
+        {/* Error Toast */}
+        {errorMessage && (
+          <div className="p-3 bg-rose-950/80 border border-rose-500 text-rose-300 rounded-xl text-xs flex items-center gap-2 animate-in fade-in">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
         <div className="pt-2 flex justify-end">
           <button
             onClick={onClose}
             className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl"
           >
-            Selesai
+            Tutup
           </button>
         </div>
       </div>
     </div>
   );
 };
+

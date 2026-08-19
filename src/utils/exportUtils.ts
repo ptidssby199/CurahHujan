@@ -3,6 +3,67 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Region, LiveRainfallData, EarlyWarningAlert } from '../types';
 
+export function exportToCSV(
+  regions: Region[],
+  rainfallDataMap: Record<string, LiveRainfallData>
+) {
+  const dateStr = new Date().toISOString().split('T')[0];
+  const headers = [
+    'No',
+    'Wilayah',
+    'Provinsi',
+    'Pulau',
+    'Curah Hujan Saat Ini (mm/jam)',
+    'Akumulasi 24 Jam (mm)',
+    'Prediksi 24 Jam (mm)',
+    'Peluang Hujan (%)',
+    'Suhu (°C)',
+    'Kelembaban (%)',
+    'Kecepatan Angin (km/j)',
+    'Kondisi Cuaca',
+    'Status Peringatan',
+    'Kode Stasiun',
+    'Latitude',
+    'Longitude'
+  ];
+
+  const rows = regions.map((reg, idx) => {
+    const d = rainfallDataMap[reg.id];
+    return [
+      idx + 1,
+      `"${reg.name}"`,
+      `"${reg.province}"`,
+      `"${reg.island}"`,
+      d ? d.currentRainfall : 0,
+      d ? d.rainfallPast24h : 0,
+      d ? d.rainfallNext24h : 0,
+      d ? d.precipitationProbability : 0,
+      d ? d.temperature : 0,
+      d ? d.humidity : 0,
+      d ? d.windSpeed : 0,
+      `"${d ? d.weatherDescription : '-'}"`,
+      `"${d ? d.alertSeverity.toUpperCase() : 'NORMAL'}"`,
+      `"${reg.stationCode}"`,
+      reg.lat,
+      reg.lng
+    ].join(',');
+  });
+
+  const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.style.display = 'none';
+  a.href = url;
+  a.download = `Data_Curah_Hujan_Indonesia_${dateStr}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 500);
+}
+
 export function exportToExcel(
   regions: Region[],
   rainfallDataMap: Record<string, LiveRainfallData>,
@@ -74,9 +135,27 @@ export function exportToExcel(
     XLSX.utils.book_append_sheet(wb, wsDaily, `Prakiraan 7 Hari - ${selectedRegion.name.slice(0, 20)}`);
   }
 
-  // Trigger download
+  // Trigger download with Blob & ObjectURL for iframe & browser compatibility
   const fileName = `Laporan_Curah_Hujan_Indonesia_${dateStr}.xlsx`;
-  XLSX.writeFile(wb, fileName);
+  
+  try {
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 500);
+  } catch (e) {
+    console.warn('Fallback to XLSX.writeFile:', e);
+    XLSX.writeFile(wb, fileName);
+  }
 }
 
 export function exportToPDF(
