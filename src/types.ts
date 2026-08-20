@@ -20,7 +20,7 @@ export type AlertSeverity = 'normal' | 'waspada' | 'siaga' | 'awas';
 export interface Region {
   id: string;
   name: string;
-  type: 'Kota' | 'Kabupaten' | 'Ibukota Provinsi';
+  type: 'Kota' | 'Kabupaten' | 'Ibukota Provinsi' | 'Kecamatan';
   province: string;
   island: IslandGroup;
   lat: number;

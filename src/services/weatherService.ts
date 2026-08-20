@@ -1,5 +1,6 @@
 import { 
   Region, 
+  IslandGroup,
   LiveRainfallData, 
   RainfallIntensityLevel, 
   AlertSeverity, 
@@ -554,4 +555,184 @@ export async function fetch30DaysHistoryForMultipleRegions(
 
   return results;
 }
+
+// Preset popular Kecamatans across Indonesia for instant selection
+export const POPULAR_KECAMATAN_PRESETS: Region[] = [
+  {
+    id: 'kec-menteng',
+    name: 'Kec. Menteng (Jakarta Pusat)',
+    type: 'Kecamatan',
+    province: 'DKI Jakarta',
+    island: 'Jawa',
+    lat: -6.1963,
+    lng: 106.8315,
+    elevationMeters: 12,
+    stationCode: 'KEC-317101',
+    timezone: 'WIB',
+  },
+  {
+    id: 'kec-tebet',
+    name: 'Kec. Tebet (Jakarta Selatan)',
+    type: 'Kecamatan',
+    province: 'DKI Jakarta',
+    island: 'Jawa',
+    lat: -6.2307,
+    lng: 106.8523,
+    elevationMeters: 18,
+    stationCode: 'KEC-317401',
+    timezone: 'WIB',
+  },
+  {
+    id: 'kec-cisarua',
+    name: 'Kec. Cisarua / Puncak (Kab. Bogor)',
+    type: 'Kecamatan',
+    province: 'Jawa Barat',
+    island: 'Jawa',
+    lat: -6.6976,
+    lng: 106.9388,
+    elevationMeters: 850,
+    stationCode: 'KEC-320124',
+    timezone: 'WIB',
+  },
+  {
+    id: 'kec-sukasari',
+    name: 'Kec. Sukasari (Kota Bandung)',
+    type: 'Kecamatan',
+    province: 'Jawa Barat',
+    island: 'Jawa',
+    lat: -6.8722,
+    lng: 107.5878,
+    elevationMeters: 780,
+    stationCode: 'KEC-327301',
+    timezone: 'WIB',
+  },
+  {
+    id: 'kec-coblong',
+    name: 'Kec. Coblong (Kota Bandung / Dago)',
+    type: 'Kecamatan',
+    province: 'Jawa Barat',
+    island: 'Jawa',
+    lat: -6.8833,
+    lng: 107.6189,
+    elevationMeters: 790,
+    stationCode: 'KEC-327302',
+    timezone: 'WIB',
+  },
+  {
+    id: 'kec-klojen',
+    name: 'Kec. Klojen (Kota Malang)',
+    type: 'Kecamatan',
+    province: 'Jawa Timur',
+    island: 'Jawa',
+    lat: -7.9785,
+    lng: 112.6318,
+    elevationMeters: 450,
+    stationCode: 'KEC-357301',
+    timezone: 'WIB',
+  },
+  {
+    id: 'kec-gubeng',
+    name: 'Kec. Gubeng (Kota Surabaya)',
+    type: 'Kecamatan',
+    province: 'Jawa Timur',
+    island: 'Jawa',
+    lat: -7.2758,
+    lng: 112.7562,
+    elevationMeters: 6,
+    stationCode: 'KEC-357801',
+    timezone: 'WIB',
+  },
+  {
+    id: 'kec-kuta',
+    name: 'Kec. Kuta (Kab. Badung)',
+    type: 'Kecamatan',
+    province: 'Bali',
+    island: 'Bali & Nusa Tenggara',
+    lat: -8.7231,
+    lng: 115.1764,
+    elevationMeters: 4,
+    stationCode: 'KEC-510301',
+    timezone: 'WITA',
+  },
+  {
+    id: 'kec-ubud',
+    name: 'Kec. Ubud (Kab. Gianyar)',
+    type: 'Kecamatan',
+    province: 'Bali',
+    island: 'Bali & Nusa Tenggara',
+    lat: -8.5069,
+    lng: 115.2625,
+    elevationMeters: 205,
+    stationCode: 'KEC-510403',
+    timezone: 'WITA',
+  },
+  {
+    id: 'kec-medan-kota',
+    name: 'Kec. Medan Kota (Kota Medan)',
+    type: 'Kecamatan',
+    province: 'Sumatera Utara',
+    island: 'Sumatera',
+    lat: 3.5786,
+    lng: 98.6925,
+    elevationMeters: 25,
+    stationCode: 'KEC-127101',
+    timezone: 'WIB',
+  },
+];
+
+// Live Geocoding Search for ANY Kecamatan across Indonesia
+export async function searchKecamatan(query: string): Promise<Region[]> {
+  const trimmed = query.trim();
+  if (!trimmed || trimmed.length < 2) return [];
+
+  try {
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(trimmed)}&country=ID&count=12&language=id`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const results = json.results || [];
+
+    return results.map((item: any, idx: number): Region => {
+      const lat = item.latitude;
+      const lng = item.longitude;
+      const admin1 = item.admin1 || 'Indonesia';
+      const admin2 = item.admin2 ? ` (${item.admin2})` : '';
+      
+      // Determine island group based on coordinates
+      let island: IslandGroup = 'Jawa';
+      if (lng < 106 && lat > -6) island = 'Sumatera';
+      else if (lng >= 106 && lng <= 115 && lat < -5.5) island = 'Jawa';
+      else if (lng >= 108 && lng <= 119 && lat >= -4.5 && lat <= 4.5) island = 'Kalimantan';
+      else if (lng >= 118 && lng <= 126 && lat >= -6 && lat <= 2.5) island = 'Sulawesi';
+      else if (lng >= 114.4 && lng <= 125.5 && lat <= -8) island = 'Bali & Nusa Tenggara';
+      else if (lng >= 124) island = 'Maluku & Papua';
+
+      // Timezone
+      let timezone: 'WIB' | 'WITA' | 'WIT' = 'WIB';
+      if (lng > 120 && lng <= 130) timezone = 'WITA';
+      else if (lng > 130) timezone = 'WIT';
+
+      const prefix = item.name.toLowerCase().startsWith('kecamatan') || item.name.toLowerCase().startsWith('kec.')
+        ? ''
+        : 'Kec. ';
+
+      return {
+        id: `kec-${item.id || idx}-${item.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+        name: `${prefix}${item.name}${admin2}`,
+        type: 'Kecamatan',
+        province: admin1,
+        island,
+        lat: Number(lat.toFixed(4)),
+        lng: Number(lng.toFixed(4)),
+        elevationMeters: Math.round(item.elevation || 15),
+        stationCode: `KEC-${item.id ? String(item.id).slice(-6) : '00' + idx}`,
+        timezone,
+      };
+    });
+  } catch (err) {
+    console.warn('Geocoding search error:', err);
+    return [];
+  }
+}
+
 

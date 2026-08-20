@@ -404,10 +404,10 @@ export function export30DaysToExcel(
     XLSX.utils.book_append_sheet(workbook, sheet, cleanName);
   };
 
-  // Sheet 1: Rekap 30 Hari Seluruh Wilayah
+  // Sheet 1: Rekap 30 Hari Seluruh Wilayah / Kecamatan
   const summaryRows = histories.map((h, idx) => ({
     No: idx + 1,
-    'Wilayah / Kota': h.regionName,
+    'Wilayah / Kecamatan': h.regionName,
     Provinsi: h.province,
     Pulau: h.island,
     'Kode Stasiun': h.stationCode,
@@ -426,27 +426,56 @@ export function export30DaysToExcel(
   const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
   safeAppendSheet(wb, wsSummary, 'Rekap 30 Hari');
 
-  // Sheet 2: Detail Harian untuk Wilayah Terpilih (atau wilayah pertama)
-  const targetHistory = selectedRegion 
-    ? histories.find(h => h.regionId === selectedRegion.id) || histories[0]
-    : histories[0];
+  // Sheet 2: Detail Harian Per Tanggal (Semua Tanggal untuk Semua Wilayah/Kecamatan)
+  const allDailyRows: any[] = [];
+  let rowIdx = 1;
 
-  if (targetHistory && targetHistory.dailyList.length > 0) {
-    const dailyRows = targetHistory.dailyList.map((d, idx) => ({
-      No: idx + 1,
-      Wilayah: targetHistory.regionName,
-      Tanggal: d.date,
-      Hari: d.dayName,
-      'Curah Hujan (mm)': d.rainfall,
-      'Kategori Intensitas': d.intensityCategory,
-      'Suhu Maks (°C)': d.maxTemp,
-      'Suhu Min (°C)': d.minTemp,
-      'Kecepatan Angin Maks (km/j)': d.maxWindSpeed,
-      'Kondisi Cuaca': d.weatherDescription,
-    }));
+  for (const h of histories) {
+    for (const d of h.dailyList) {
+      allDailyRows.push({
+        No: rowIdx++,
+        'Wilayah / Kecamatan': h.regionName,
+        Provinsi: h.province,
+        Pulau: h.island,
+        Tanggal: d.date,
+        Hari: d.dayName,
+        'Curah Hujan (mm)': d.rainfall,
+        'Kategori Intensitas': d.intensityCategory,
+        'Suhu Maks (°C)': d.maxTemp,
+        'Suhu Min (°C)': d.minTemp,
+        'Kecepatan Angin Maks (km/j)': d.maxWindSpeed,
+        'Kondisi Cuaca': d.weatherDescription,
+      });
+    }
+  }
 
-    const wsDaily = XLSX.utils.json_to_sheet(dailyRows);
-    safeAppendSheet(wb, wsDaily, 'Detail Harian 30 Hari');
+  if (allDailyRows.length > 0) {
+    const wsDaily = XLSX.utils.json_to_sheet(allDailyRows);
+    safeAppendSheet(wb, wsDaily, 'Detail Harian Per Tgl');
+  }
+
+  // Sheet 3: Matriks Curah Hujan Harian (Wilayah vs Tanggal)
+  if (histories.length > 0 && histories[0].dailyList.length > 0) {
+    const matrixRows = histories.map((h, i) => {
+      const row: Record<string, any> = {
+        No: i + 1,
+        'Wilayah / Kecamatan': h.regionName,
+        Provinsi: h.province,
+        'Total 30 Hari (mm)': h.totalRainfall30d,
+        'Rata-rata (mm)': h.averageDailyRain,
+        'Maks Harian (mm)': h.maxDailyRain,
+      };
+
+      // Add each date as a separate column
+      h.dailyList.forEach((d) => {
+        row[d.date] = d.rainfall;
+      });
+
+      return row;
+    });
+
+    const wsMatrix = XLSX.utils.json_to_sheet(matrixRows);
+    safeAppendSheet(wb, wsMatrix, 'Matriks Curah Hujan');
   }
 
   const fileName = `Rekap_Curah_Hujan_30_Hari_${dateStr}.xlsx`;
@@ -477,12 +506,9 @@ export function export30DaysToCSV(
 ) {
   const dateStr = new Date().toISOString().split('T')[0];
 
-  // If single region is targeted, output its full 30 days daily logs. If multiple, output all daily records.
-  const targetHistories = (selectedRegion && histories.length === 1) ? histories : histories;
-
   const headers = [
     'No',
-    'Wilayah',
+    'Wilayah / Kecamatan',
     'Provinsi',
     'Pulau',
     'Kode Stasiun',
@@ -499,7 +525,7 @@ export function export30DaysToCSV(
   let rowCounter = 1;
   const rows: string[] = [];
 
-  for (const h of targetHistories) {
+  for (const h of histories) {
     for (const d of h.dailyList) {
       rows.push([
         rowCounter++,
