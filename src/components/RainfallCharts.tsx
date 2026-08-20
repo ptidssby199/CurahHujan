@@ -147,15 +147,28 @@ export const RainfallCharts: React.FC<RainfallChartsProps> = ({
         </div>
 
         {/* Live Status Badge */}
-        <div className="flex items-center gap-3">
-          <div className={`px-3 py-1.5 rounded-xl border flex items-center gap-2 ${standard.bgColor} ${standard.borderColor}`}>
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Kondisi Cuaca Saat Ini (misal Hujan Petir / Hujan Ringan) */}
+          <div className="bg-slate-800/80 px-3.5 py-1.5 rounded-xl border border-slate-700/80 flex items-center gap-2 shadow-inner">
+            <span className="text-lg">
+              {data.weatherCode >= 95 ? '⛈️' : data.weatherCode >= 80 ? '🌧️' : data.weatherCode >= 60 ? '🌦️' : data.weatherCode >= 50 ? '🌦️' : data.weatherCode >= 45 ? '🌫️' : data.weatherCode >= 1 ? '⛅' : '☀️'}
+            </span>
+            <div>
+              <div className="text-[10px] uppercase font-bold text-slate-400">Kondisi Cuaca Saat Ini</div>
+              <div className="text-xs font-black text-cyan-300">{data.weatherDescription}</div>
+            </div>
+          </div>
+
+          {/* Status Klasifikasi Intensitas BMKG */}
+          <div className={`px-3.5 py-1.5 rounded-xl border flex items-center gap-2 ${standard.bgColor} ${standard.borderColor}`}>
             <span className="w-2.5 h-2.5 rounded-full animate-ping" style={{ backgroundColor: standard.color }}></span>
             <div>
-              <div className="text-[10px] uppercase font-bold text-slate-400">Status BMKG</div>
+              <div className="text-[10px] uppercase font-bold text-slate-400">Klasifikasi Intensitas BMKG</div>
               <div className="text-xs font-bold text-white">{standard.name}</div>
             </div>
           </div>
-          <div className="bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700/60">
+
+          <div className="bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700/60 hidden sm:block">
             <div className="text-[10px] text-slate-400">Update Terakhir</div>
             <div className="text-xs font-semibold text-slate-200 flex items-center gap-1">
               <Clock className="w-3 h-3 text-cyan-400" />
@@ -170,15 +183,16 @@ export const RainfallCharts: React.FC<RainfallChartsProps> = ({
         {/* Curah Hujan Saat Ini */}
         <div className="bg-slate-950/70 p-3.5 rounded-xl border border-slate-800 hover:border-cyan-500/40 transition">
           <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-xs font-medium">Curah Hujan Saat Ini</span>
+            <span className="text-xs font-medium">Laju Curah Hujan</span>
             <CloudRain className="w-4 h-4 text-cyan-400" />
           </div>
           <div className="flex items-baseline gap-1.5">
             <span className="text-2xl font-extrabold text-cyan-300">{data.currentRainfall}</span>
             <span className="text-xs text-slate-400">mm/jam</span>
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            Peluang Hujan: <span className="text-cyan-400 font-semibold">{data.precipitationProbability}%</span>
+          <div className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
+            <span>Kondisi: <strong className="text-slate-200">{data.weatherDescription}</strong></span>
+            <span className="text-cyan-400 font-semibold">{data.precipitationProbability}% prob</span>
           </div>
         </div>
 
