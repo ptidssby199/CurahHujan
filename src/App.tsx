@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Region, LiveRainfallData, EarlyWarningAlert } from './types';
+import { Region, LiveRainfallData, EarlyWarningAlert, EarthquakeInfo, EarthquakeFeedData } from './types';
 import { INDONESIA_REGIONS } from './data/indonesiaRegions';
 import { 
   fetchLiveRainfallForRegion, 
   generateAlertsForRegions, 
   playEWSAlertSound 
 } from './services/weatherService';
+import { 
+  fetchRealtimeEarthquakes, 
+  playEarthquakeAlarmSound 
+} from './services/earthquakeService';
 import { RainfallMap } from './components/RainfallMap';
 import { RainfallCharts } from './components/RainfallCharts';
 import { AlertCenter } from './components/AlertCenter';
@@ -13,6 +17,8 @@ import { RegionSelector } from './components/RegionSelector';
 import { RegionalTable } from './components/RegionalTable';
 import { ExportModal } from './components/ExportModal';
 import { AIAssistant } from './components/AIAssistant';
+import { EarthquakeTicker } from './components/EarthquakeTicker';
+import { EarthquakeCenter } from './components/EarthquakeCenter';
 import { 
   CloudRain, 
   Download, 
@@ -27,7 +33,8 @@ import {
   Clock,
   Sparkles,
   ExternalLink,
-  Smartphone
+  Smartphone,
+  Activity
 } from 'lucide-react';
 
 const LOCAL_STORAGE_KEY_FAVS = 'hujannusantara_favs_v1';
@@ -87,7 +94,7 @@ export default function App() {
   });
 
   // UI States
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'table' | 'standards'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'earthquake' | 'table' | 'standards'>('dashboard');
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string>('');
@@ -95,7 +102,13 @@ export default function App() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstallable, setIsInstallable] = useState<boolean>(false);
 
+  // Earthquake States
+  const [earthquakeFeed, setEarthquakeFeed] = useState<EarthquakeFeedData | null>(null);
+  const [isEarthquakeLoading, setIsEarthquakeLoading] = useState<boolean>(false);
+  const [focusedEarthquake, setFocusedEarthquake] = useState<EarthquakeInfo | null>(null);
+
   const prevAlertCountRef = useRef<number>(0);
+  const prevLatestEqIdRef = useRef<string>('');
 
   // Listen for PWA BeforeInstallPrompt Event
   useEffect(() => {
@@ -207,10 +220,35 @@ export default function App() {
     setCountdown(90);
   }, [selectedRegion, hourlyThreshold, soundEnabled]);
 
+  // Fetch Real-time Earthquake Data (BMKG + USGS Fallback)
+  const fetchEarthquakeFeed = useCallback(async () => {
+    setIsEarthquakeLoading(true);
+    try {
+      const feed = await fetchRealtimeEarthquakes(selectedRegion);
+      setEarthquakeFeed(feed);
+
+      // Sound alarm if a new significant earthquake (M >= 5.0) or tsunami warning occurs
+      if (soundEnabled && feed.latestEarthquake) {
+        const isNewEq = feed.latestEarthquake.id !== prevLatestEqIdRef.current;
+        if (isNewEq && prevLatestEqIdRef.current !== '') {
+          if (feed.latestEarthquake.magnitude >= 5.0 || feed.latestEarthquake.isTsunamiWarning) {
+            playEarthquakeAlarmSound(feed.latestEarthquake.severity);
+          }
+        }
+        prevLatestEqIdRef.current = feed.latestEarthquake.id;
+      }
+    } catch (err) {
+      console.error('Earthquake feed fetch failed:', err);
+    } finally {
+      setIsEarthquakeLoading(false);
+    }
+  }, [selectedRegion, soundEnabled]);
+
   // Initial Load & Selected Region Switch
   useEffect(() => {
     fetchAllData();
-  }, [fetchAllData]);
+    fetchEarthquakeFeed();
+  }, [fetchAllData, fetchEarthquakeFeed]);
 
   // Auto-refresh interval (90s) & Countdown
   useEffect(() => {
@@ -218,6 +256,7 @@ export default function App() {
       setCountdown((prev) => {
         if (prev <= 1) {
           fetchAllData();
+          fetchEarthquakeFeed();
           return 90;
         }
         return prev - 1;
@@ -225,7 +264,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [fetchAllData]);
+  }, [fetchAllData, fetchEarthquakeFeed]);
 
   // Select region by ID (from alert or table)
   const handleSelectRegionById = (regionId: string) => {
@@ -247,19 +286,19 @@ export default function App() {
           {/* Logo & Brand */}
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-950/60 ring-2 ring-cyan-400/30">
-              <CloudRain className="w-6 h-6 text-white" />
+              <Activity className="w-6 h-6 text-white" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-lg text-white tracking-tight">
-                  HUJAN<span className="text-cyan-400">NUSANTARA</span>
+                  INFO<span className="text-cyan-400">NUSANTARA</span>
                 </span>
                 <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-extrabold uppercase rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800">
-                  EWS Real-Time
+                  Cuaca & Gempa Real-Time
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 hidden md:block">
-                Sistem Pemantauan Curah Hujan & Peringatan Dini Bencana Hidrometeorologi Indonesia
+                Sistem Pemantauan Curah Hujan & Aktivitas Gempa Bumi Real-Time Indonesia
               </p>
             </div>
           </div>
@@ -320,12 +359,27 @@ export default function App() {
 
       {/* Main Content Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6 flex-1 w-full">
+        {/* Real-time Earthquake Live Ticker Banner */}
+        <EarthquakeTicker
+          latestEarthquake={earthquakeFeed?.latestEarthquake}
+          selectedRegion={selectedRegion}
+          onOpenEarthquakeCenter={() => {
+            setActiveTab('earthquake');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          onFocusEarthquakeOnMap={(eq) => {
+            setFocusedEarthquake(eq);
+            setActiveTab('dashboard');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
+
         {/* Navigation View Switcher */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60 p-2 rounded-2xl border border-slate-800">
-          <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+          <div className="flex flex-wrap bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs gap-1">
             <button
               onClick={() => setActiveTab('dashboard')}
-              className={`px-4 py-2 rounded-lg font-bold transition flex items-center gap-2 ${
+              className={`px-3.5 py-2 rounded-lg font-bold transition flex items-center gap-2 ${
                 activeTab === 'dashboard'
                   ? 'bg-cyan-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -336,8 +390,25 @@ export default function App() {
             </button>
 
             <button
+              onClick={() => setActiveTab('earthquake')}
+              className={`px-3.5 py-2 rounded-lg font-bold transition flex items-center gap-2 relative ${
+                activeTab === 'earthquake'
+                  ? 'bg-rose-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Activity className="w-4 h-4 text-rose-400 animate-pulse" />
+              <span>Pusat Gempa Bumi</span>
+              {earthquakeFeed?.latestEarthquake && (
+                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-rose-950 text-rose-300 border border-rose-700">
+                  M{earthquakeFeed.latestEarthquake.magnitude.toFixed(1)}
+                </span>
+              )}
+            </button>
+
+            <button
               onClick={() => setActiveTab('table')}
-              className={`px-4 py-2 rounded-lg font-bold transition flex items-center gap-2 ${
+              className={`px-3.5 py-2 rounded-lg font-bold transition flex items-center gap-2 ${
                 activeTab === 'table'
                   ? 'bg-cyan-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -349,7 +420,7 @@ export default function App() {
 
             <button
               onClick={() => setActiveTab('standards')}
-              className={`px-4 py-2 rounded-lg font-bold transition flex items-center gap-2 hidden md:flex ${
+              className={`px-3.5 py-2 rounded-lg font-bold transition flex items-center gap-2 hidden md:flex ${
                 activeTab === 'standards'
                   ? 'bg-cyan-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -401,7 +472,7 @@ export default function App() {
                   Peta Radar Presipitasi & Stasiun Meteorologi Real-Time
                 </h3>
                 <span className="text-[11px] text-slate-400">
-                  Klik stasiun di peta untuk memusatkan grafik
+                  Klik stasiun cuaca atau titik episenter gempa di peta untuk informasi detail
                 </span>
               </div>
 
@@ -413,6 +484,12 @@ export default function App() {
                 onToggleFavorite={handleToggleFavorite}
                 favoriteIds={favoriteIds}
                 userHourlyThreshold={hourlyThreshold}
+                earthquakes={earthquakeFeed?.allEarthquakes || []}
+                focusedEarthquake={focusedEarthquake}
+                onOpenEarthquakeCenter={() => {
+                  setActiveTab('earthquake');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
               />
             </div>
 
@@ -436,6 +513,23 @@ export default function App() {
               onToggleFavorite={handleToggleFavorite}
             />
           </div>
+        )}
+
+        {/* Active View: Earthquake Center Mode */}
+        {activeTab === 'earthquake' && (
+          <EarthquakeCenter
+            feed={earthquakeFeed}
+            selectedRegion={selectedRegion}
+            isLoading={isEarthquakeLoading}
+            onRefresh={fetchEarthquakeFeed}
+            soundEnabled={soundEnabled}
+            onToggleSound={handleToggleSound}
+            onFocusOnMap={(eq) => {
+              setFocusedEarthquake(eq);
+              setActiveTab('dashboard');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
         )}
 
         {/* Active View: Table Mode */}
@@ -542,7 +636,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-cyan-400"></div>
-            <span>HujanNusantara &copy; {new Date().getFullYear()} - Sistem Informasi Hidrometeorologi Real-Time</span>
+            <span>InfoNusantara &copy; {new Date().getFullYear()} - Sistem Informasi Cuaca & Gempa Real-Time BMKG</span>
           </div>
           <div className="flex items-center gap-4 text-[11px]">
             <span>Kontak Darurat BNPB: <strong>117</strong></span>

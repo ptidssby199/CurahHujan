@@ -48,8 +48,8 @@ export const AlertCenter: React.FC<AlertCenterProps> = ({
         const perm = await Notification.requestPermission();
         setNotificationStatus(perm);
         if (perm === 'granted') {
-          new Notification('HujanNusantara EWS', {
-            body: 'Notifikasi peringatan dini curah hujan aktif.',
+          new Notification('InfoNusantara EWS', {
+            body: 'Notifikasi peringatan dini cuaca dan gempa aktif.',
             icon: '/favicon.ico',
           });
         }

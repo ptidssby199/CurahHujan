@@ -131,3 +131,41 @@ export interface MonthHistorySummary {
   dailyList: HistoricalDailyData[];
 }
 
+export type EarthquakeSeverity = 'minor' | 'moderate' | 'strong' | 'major' | 'great';
+
+export interface EarthquakeInfo {
+  id: string;
+  dateTime: string; // Tanggal & Jam WIB / UTC ISO
+  dateStr: string; // "19 Agustus 2026"
+  timeStr: string; // "14:20:15 WIB"
+  timestamp: number;
+  magnitude: number; // e.g. 5.4
+  depthKm: number; // Kedalaman km e.g. 10
+  depthStr: string; // "10 km"
+  lat: number;
+  lng: number;
+  coordinates: string; // e.g. "6.84 LS, 107.05 BT"
+  location: string; // e.g. "Pusat gempa berada di laut 67 km BaratDaya Sumur"
+  wilayah: string; // e.g. "Kab. Cianjur, Jawa Barat"
+  tsunamiPotential: string; // "Tidak berpotensi TSUNAMI" atau "Waspada / Siaga TSUNAMI"
+  isTsunamiWarning: boolean;
+  feltAreas?: string; // "MMI III - IV Cianjur, MMI II Sukabumi"
+  shakemapUrl?: string; // URL shakemap BMKG
+  source: 'BMKG' | 'USGS';
+  severity: EarthquakeSeverity;
+  timeAgo?: string;
+  isLatest?: boolean;
+  distanceToSelectedKm?: number;
+  estimatedShakingIntensity?: string; // MMI scale estimated
+}
+
+export interface EarthquakeFeedData {
+  latestAutoEarthquake: EarthquakeInfo | null;
+  latestEarthquake?: EarthquakeInfo | null;
+  recentEarthquakes: EarthquakeInfo[];
+  feltEarthquakes: EarthquakeInfo[];
+  allEarthquakes: EarthquakeInfo[];
+  lastUpdated: string;
+  sourceLabel: string;
+}
+

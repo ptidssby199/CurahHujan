@@ -1,7 +1,7 @@
 {
-  "name": "HujanNusantara - Pantauan Curah Hujan Real-Time",
-  "short_name": "HujanNusantara",
-  "description": "Aplikasi pemantauan data curah hujan real-time di seluruh wilayah Indonesia dengan peta interaktif, grafik historis, dan peringatan dini bencana.",
+  "name": "InfoNusantara - Pantauan Curah Hujan & Gempa Real-Time",
+  "short_name": "InfoNusantara",
+  "description": "Aplikasi pemantauan data curah hujan dan aktivitas gempa bumi real-time di seluruh wilayah Indonesia dengan peta interaktif, grafik historis, dan peringatan dini bencana.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

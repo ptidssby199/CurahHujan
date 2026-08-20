@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import { Region, LiveRainfallData, IslandGroup } from '../types';
+import { Region, LiveRainfallData, IslandGroup, EarthquakeInfo } from '../types';
 import { BMKG_RAINFALL_STANDARDS } from '../data/indonesiaRegions';
 import { 
   POPULAR_KECAMATAN_PRESETS, 
@@ -24,7 +24,9 @@ import {
   X,
   Navigation,
   Sparkles,
-  Home
+  Home,
+  Activity,
+  Waves
 } from 'lucide-react';
 
 interface RainfallMapProps {
@@ -35,6 +37,9 @@ interface RainfallMapProps {
   onToggleFavorite: (regionId: string) => void;
   favoriteIds: string[];
   userHourlyThreshold: number;
+  earthquakes?: EarthquakeInfo[];
+  focusedEarthquake?: EarthquakeInfo | null;
+  onOpenEarthquakeCenter?: () => void;
 }
 
 const TILE_SERVERS = {
@@ -86,15 +91,20 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
   onToggleFavorite,
   favoriteIds,
   userHourlyThreshold,
+  earthquakes = [],
+  focusedEarthquake,
+  onOpenEarthquakeCenter,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
   const radarLayerRef = useRef<L.LayerGroup | null>(null);
+  const earthquakeLayerRef = useRef<L.LayerGroup | null>(null);
   const baseTileLayerRef = useRef<L.TileLayer | null>(null);
 
   const [activeTile, setActiveTile] = useState<keyof typeof TILE_SERVERS>('dark');
   const [showRadarWave, setShowRadarWave] = useState<boolean>(true);
+  const [showEarthquakeLayer, setShowEarthquakeLayer] = useState<boolean>(true);
   const [filterMode, setFilterMode] = useState<'all' | 'raining' | 'alert_only'>('all');
   const [selectedIsland, setSelectedIsland] = useState<string>('all');
   const [showLegend, setShowLegend] = useState<boolean>(true);
@@ -177,6 +187,7 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
     baseTileLayerRef.current = baseLayer;
     markersLayerRef.current = L.layerGroup().addTo(map);
     radarLayerRef.current = L.layerGroup().addTo(map);
+    earthquakeLayerRef.current = L.layerGroup().addTo(map);
 
     // Map Click Handler: allow clicking anywhere to inspect & geocode
     map.on('click', async (e: L.LeafletMouseEvent) => {
@@ -251,6 +262,191 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
       duration: 1.2,
     });
   }, [selectedRegion]);
+
+  // Jump and highlight earthquake epicenter when selected
+  useEffect(() => {
+    if (!mapInstanceRef.current || !focusedEarthquake) return;
+    setShowEarthquakeLayer(true);
+    mapInstanceRef.current.flyTo([focusedEarthquake.lat, focusedEarthquake.lng], 9, {
+      duration: 1.5,
+    });
+  }, [focusedEarthquake]);
+
+  // Render Earthquake Epicenters & Concentric Seismic Ripple Waves
+  useEffect(() => {
+    if (!mapInstanceRef.current || !earthquakeLayerRef.current) return;
+
+    earthquakeLayerRef.current.clearLayers();
+
+    if (!showEarthquakeLayer || !earthquakes || earthquakes.length === 0) return;
+
+    earthquakes.forEach((eq) => {
+      const isFocused = focusedEarthquake?.id === eq.id;
+      const mag = eq.magnitude;
+      const isSevere = mag >= 5.0;
+      const isTsunami = eq.isTsunamiWarning;
+
+      // Color scheme based on magnitude
+      let colorHex = '#06b6d4'; // cyan for M < 4.5
+      let bgClass = 'bg-cyan-600';
+      if (mag >= 7.0 || isTsunami) {
+        colorHex = '#dc2626'; // red-600
+        bgClass = 'bg-rose-600';
+      } else if (mag >= 6.0) {
+        colorHex = '#ea580c'; // orange-600
+        bgClass = 'bg-orange-600';
+      } else if (mag >= 5.0) {
+        colorHex = '#d97706'; // amber-600
+        bgClass = 'bg-amber-600';
+      } else if (mag >= 4.0) {
+        colorHex = '#ca8a04'; // yellow-600
+        bgClass = 'bg-yellow-600';
+      }
+
+      // Seismic Shockwave Circles (Estimated Felt/Damage Radius)
+      // Radius scales with magnitude (approximate empirical radius)
+      const primaryRadius = Math.max(30000, Math.pow(10, 0.45 * mag - 0.2) * 1000);
+      const outerRadius = primaryRadius * 1.8;
+
+      // Outer wave
+      const outerCircle = L.circle([eq.lat, eq.lng], {
+        radius: outerRadius,
+        color: colorHex,
+        weight: 1,
+        dashArray: '4, 8',
+        opacity: isFocused ? 0.8 : 0.4,
+        fillColor: colorHex,
+        fillOpacity: isFocused ? 0.08 : 0.03,
+      });
+      outerCircle.addTo(earthquakeLayerRef.current);
+
+      // Inner intense shaking zone
+      const innerCircle = L.circle([eq.lat, eq.lng], {
+        radius: primaryRadius,
+        color: colorHex,
+        weight: 1.5,
+        opacity: isFocused ? 0.9 : 0.6,
+        fillColor: colorHex,
+        fillOpacity: isFocused ? 0.18 : 0.08,
+      });
+      innerCircle.addTo(earthquakeLayerRef.current);
+
+      // Custom Seismic Epicenter Marker
+      const size = isSevere ? 36 : 30;
+      const markerHtml = `
+        <div class="relative group cursor-pointer flex items-center justify-center -translate-x-1/2 -translate-y-1/2">
+          <!-- Concentric pulsing rings -->
+          <div class="absolute w-12 h-12 rounded-full animate-ping opacity-60 pointer-events-none" style="background-color: ${colorHex};"></div>
+          <div class="absolute w-8 h-8 rounded-full animate-pulse opacity-80 pointer-events-none" style="background-color: ${colorHex};"></div>
+          
+          <!-- Epicenter Pin Badge -->
+          <div class="relative flex flex-col items-center justify-center ${size === 36 ? 'w-9 h-9' : 'w-8 h-8'} rounded-full border-2 ${
+            isFocused ? 'border-white ring-4 ring-rose-400 scale-125 z-40' : 'border-slate-900 shadow-xl'
+          } ${bgClass} text-white font-black text-center shadow-lg transition-all duration-300">
+            <span class="text-[9px] leading-none font-bold">M${mag.toFixed(1)}</span>
+            <span class="text-[7px] leading-none opacity-80 font-mono">${eq.depthStr}</span>
+          </div>
+
+          <!-- Top Label for Latest -->
+          ${eq.isLatest ? '<div class="absolute -top-3.5 px-1.5 py-0.2 bg-rose-600 text-white border border-rose-400 text-[7px] font-black rounded-full uppercase tracking-tight shadow animate-pulse whitespace-nowrap">TERKINI</div>' : ''}
+          ${isTsunami ? '<div class="absolute -bottom-3 px-1.5 py-0.2 bg-purple-900 text-purple-200 border border-purple-500 text-[7px] font-black rounded uppercase tracking-tight shadow">TSUNAMI</div>' : ''}
+        </div>
+      `;
+
+      const eqIcon = L.divIcon({
+        html: markerHtml,
+        className: 'custom-earthquake-marker',
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
+      });
+
+      const eqMarker = L.marker([eq.lat, eq.lng], { icon: eqIcon });
+
+      // Epicenter Popup
+      const popupContent = `
+        <div class="p-3 bg-slate-900 text-slate-100 rounded-xl shadow-2xl font-sans min-w-[240px] max-w-[300px] border border-rose-500/60">
+          <div class="flex items-start justify-between gap-2 border-b border-slate-800 pb-2 mb-2">
+            <div>
+              <div class="flex items-center gap-1.5 text-[10px] text-rose-400 font-extrabold uppercase tracking-wider">
+                <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                INFO GEMPA BUMI (${eq.source})
+              </div>
+              <div class="text-sm font-black text-white mt-0.5">
+                Magnitudo M ${mag.toFixed(1)}
+              </div>
+              <div class="text-[10px] text-slate-400">${eq.dateStr} &bull; ${eq.timeStr}</div>
+            </div>
+            <span class="px-2 py-0.5 text-[10px] font-extrabold rounded-lg ${
+              isSevere ? 'bg-rose-950 text-rose-300 border border-rose-600' : 'bg-amber-950 text-amber-300 border border-amber-600'
+            }">
+              ${eq.depthStr}
+            </span>
+          </div>
+
+          <div class="space-y-1.5 text-xs mb-3">
+            <div class="text-slate-200 font-medium leading-tight">
+              📍 ${eq.location}
+            </div>
+            <div class="text-[10px] text-slate-400">
+              Koordinat: <strong>${eq.coordinates}</strong>
+            </div>
+
+            <!-- Tsunami Alert Status -->
+            <div class="p-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 ${
+              isTsunami ? 'bg-rose-950 text-rose-200 border border-rose-500 animate-pulse' : 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/80'
+            }">
+              <span>🌊</span>
+              <span>${eq.tsunamiPotential}</span>
+            </div>
+
+            ${eq.distanceToSelectedKm !== undefined ? `
+              <div class="p-1.5 rounded-lg bg-slate-950 text-[10px] border border-slate-800 text-cyan-300 font-medium">
+                Jarak ke ${selectedRegion ? selectedRegion.name : 'Wilayah Anda'}: <strong>~${eq.distanceToSelectedKm} km</strong>
+                ${eq.estimatedShakingIntensity ? `<div class="text-amber-300 text-[9px] mt-0.5">Estimasi: ${eq.estimatedShakingIntensity}</div>` : ''}
+              </div>
+            ` : ''}
+
+            ${eq.feltAreas ? `
+              <div class="text-[10px] text-amber-200/90 bg-amber-950/30 p-1.5 rounded border border-amber-800/40">
+                <strong>Dirasakan:</strong> ${eq.feltAreas}
+              </div>
+            ` : ''}
+          </div>
+
+          <div class="flex items-center gap-2 pt-1 border-t border-slate-800">
+            <button id="btn-open-eq-center-${eq.id}" class="w-full bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-bold py-1.5 px-3 rounded-lg transition flex items-center justify-center gap-1 shadow-md">
+              ⚡ Detail di Pusat Gempa
+            </button>
+          </div>
+        </div>
+      `;
+
+      eqMarker.bindPopup(popupContent, {
+        className: 'custom-leaflet-popup',
+        maxWidth: 320,
+      });
+
+      eqMarker.on('popupopen', () => {
+        const btn = document.getElementById(`btn-open-eq-center-${eq.id}`);
+        if (btn && onOpenEarthquakeCenter) {
+          btn.onclick = () => {
+            onOpenEarthquakeCenter();
+            eqMarker.closePopup();
+          };
+        }
+      });
+
+      if (earthquakeLayerRef.current) {
+        eqMarker.addTo(earthquakeLayerRef.current);
+      }
+    });
+  }, [
+    earthquakes,
+    focusedEarthquake,
+    showEarthquakeLayer,
+    selectedRegion,
+    onOpenEarthquakeCenter,
+  ]);
 
   // Handle Island Zoom
   const handleIslandFilter = (islandKey: string) => {
@@ -535,6 +731,20 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
 
         {/* Right Layer & Filter Buttons */}
         <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/80 shadow-lg pointer-events-auto">
+          {/* Toggle Earthquake Layer */}
+          <button
+            onClick={() => setShowEarthquakeLayer(!showEarthquakeLayer)}
+            className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 font-medium transition ${
+              showEarthquakeLayer
+                ? 'bg-rose-500/20 border-rose-500/60 text-rose-300 font-bold'
+                : 'bg-slate-800/80 border-slate-700 text-slate-400'
+            }`}
+            title="Tampilkan / Sembunyikan Layer Gempa Bumi Real-Time di Peta"
+          >
+            <Activity className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+            <span className="hidden sm:inline">Gempa ({earthquakes.length})</span>
+          </button>
+
           {/* Toggle Kecamatan Layer */}
           <button
             onClick={() => setShowKecamatanLayer(!showKecamatanLayer)}
