@@ -3,6 +3,11 @@ import L from 'leaflet';
 import { Region, LiveRainfallData, IslandGroup } from '../types';
 import { BMKG_RAINFALL_STANDARDS } from '../data/indonesiaRegions';
 import { 
+  POPULAR_KECAMATAN_PRESETS, 
+  searchKecamatan,
+  fetchLiveRainfallForRegion
+} from '../services/weatherService';
+import { 
   Layers, 
   Eye, 
   MapPin, 
@@ -11,7 +16,15 @@ import {
   CloudRain, 
   Maximize2,
   AlertTriangle,
-  Heart
+  Heart,
+  Building2,
+  Search,
+  Check,
+  Loader2,
+  X,
+  Navigation,
+  Sparkles,
+  Home
 } from 'lucide-react';
 
 interface RainfallMapProps {
@@ -85,6 +98,59 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
   const [filterMode, setFilterMode] = useState<'all' | 'raining' | 'alert_only'>('all');
   const [selectedIsland, setSelectedIsland] = useState<string>('all');
   const [showLegend, setShowLegend] = useState<boolean>(true);
+  
+  // Kecamatan specific states
+  const [showKecamatanLayer, setShowKecamatanLayer] = useState<boolean>(true);
+  const [pinnedKecamatans, setPinnedKecamatans] = useState<Region[]>(POPULAR_KECAMATAN_PRESETS);
+  const [kecamatanSearchQuery, setKecamatanSearchQuery] = useState<string>('');
+  const [kecamatanSearchResults, setKecamatanSearchResults] = useState<Region[]>([]);
+  const [isSearchingKecamatan, setIsSearchingKecamatan] = useState<boolean>(false);
+  const [isSearchPanelOpen, setIsSearchPanelOpen] = useState<boolean>(false);
+  const [activeKecamatanTab, setActiveKecamatanTab] = useState<'search' | 'presets'>('presets');
+
+  // Debounced search for Kecamatan
+  useEffect(() => {
+    if (!kecamatanSearchQuery.trim() || kecamatanSearchQuery.trim().length < 2) {
+      setKecamatanSearchResults([]);
+      setIsSearchingKecamatan(false);
+      return;
+    }
+
+    setIsSearchingKecamatan(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await searchKecamatan(kecamatanSearchQuery);
+        setKecamatanSearchResults(res);
+      } catch (err) {
+        console.error('Map search kecamatan error:', err);
+      } finally {
+        setIsSearchingKecamatan(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [kecamatanSearchQuery]);
+
+  // Handle selecting a kecamatan from map search or preset
+  const handleSelectKecamatanOnMap = (kec: Region) => {
+    // Add to pinned list if not already there
+    setPinnedKecamatans((prev) => {
+      const exists = prev.some((k) => k.id === kec.id || (k.lat === kec.lat && k.lng === kec.lng));
+      return exists ? prev : [kec, ...prev];
+    });
+
+    onSelectRegion(kec);
+    setIsSearchPanelOpen(false);
+    setKecamatanSearchQuery('');
+    setKecamatanSearchResults([]);
+
+    // Smoothly fly to the kecamatan with detailed zoom (13)
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo([kec.lat, kec.lng], 13, {
+        duration: 1.5,
+      });
+    }
+  };
 
   // Initialize Map
   useEffect(() => {
@@ -95,7 +161,7 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
       center: [-2.5, 118.0],
       zoom: 5,
       minZoom: 4,
-      maxZoom: 14,
+      maxZoom: 18,
       zoomControl: false,
     });
 
@@ -111,6 +177,56 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
     baseTileLayerRef.current = baseLayer;
     markersLayerRef.current = L.layerGroup().addTo(map);
     radarLayerRef.current = L.layerGroup().addTo(map);
+
+    // Map Click Handler: allow clicking anywhere to inspect & geocode
+    map.on('click', async (e: L.LeafletMouseEvent) => {
+      const lat = Number(e.latlng.lat.toFixed(4));
+      const lng = Number(e.latlng.lng.toFixed(4));
+
+      // Reverse geocode or create custom point
+      const customPoint: Region = {
+        id: `map-pt-${Math.round(lat * 1000)}-${Math.round(lng * 1000)}`,
+        name: `Titik Pengamatan (${lat}, ${lng})`,
+        type: 'Kecamatan',
+        province: 'Wilayah Terpilih',
+        island: 'Jawa',
+        lat,
+        lng,
+        elevationMeters: 50,
+        stationCode: `EWS-${Math.abs(Math.round(lat * 100))}`,
+        timezone: lng > 120 ? (lng > 130 ? 'WIT' : 'WITA') : 'WIB',
+      };
+
+      const popupHtml = `
+        <div class="p-3 bg-slate-900 text-slate-100 rounded-lg shadow-xl font-sans min-w-[220px] max-w-[260px] border border-cyan-500/50">
+          <div class="flex items-center gap-1.5 text-xs text-cyan-400 font-bold mb-1">
+            <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+            Titik Koordinat Baru
+          </div>
+          <div class="text-xs text-slate-300 mb-2">
+            Lat: <strong>${lat}</strong>, Lng: <strong>${lng}</strong>
+          </div>
+          <button id="btn-select-clicked-point" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold py-1.5 px-3 rounded-lg transition flex items-center justify-center gap-1 shadow-md">
+            🎯 Analisis Wilayah Ini
+          </button>
+        </div>
+      `;
+
+      const popup = L.popup({ className: 'custom-leaflet-popup' })
+        .setLatLng(e.latlng)
+        .setContent(popupHtml)
+        .openOn(map);
+
+      setTimeout(() => {
+        const btn = document.getElementById('btn-select-clicked-point');
+        if (btn) {
+          btn.onclick = () => {
+            handleSelectKecamatanOnMap(customPoint);
+            map.closePopup();
+          };
+        }
+      }, 50);
+    });
 
     mapInstanceRef.current = map;
 
@@ -130,7 +246,8 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
   // Jump to selected region when changed from outside
   useEffect(() => {
     if (!mapInstanceRef.current || !selectedRegion) return;
-    mapInstanceRef.current.flyTo([selectedRegion.lat, selectedRegion.lng], 9, {
+    const targetZoom = selectedRegion.type === 'Kecamatan' ? 13 : 9;
+    mapInstanceRef.current.flyTo([selectedRegion.lat, selectedRegion.lng], targetZoom, {
       duration: 1.2,
     });
   }, [selectedRegion]);
@@ -144,15 +261,31 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
     }
   };
 
-  // Render Markers & Dynamic Visuals
+  // Render Markers & Dynamic Visuals (City Stations + Kecamatans)
   useEffect(() => {
     if (!mapInstanceRef.current || !markersLayerRef.current || !radarLayerRef.current) return;
 
     markersLayerRef.current.clearLayers();
     radarLayerRef.current.clearLayers();
 
+    // Combine standard regions with pinned kecamatans (if layer active)
+    let combinedRegions = [...regions];
+    if (showKecamatanLayer) {
+      // Add pinned kecamatans avoiding duplicates
+      pinnedKecamatans.forEach((k) => {
+        if (!combinedRegions.some((r) => r.id === k.id)) {
+          combinedRegions.push(k);
+        }
+      });
+    }
+
+    // Always ensure selectedRegion is in the list
+    if (selectedRegion && !combinedRegions.some((r) => r.id === selectedRegion.id)) {
+      combinedRegions.push(selectedRegion);
+    }
+
     // Filter regions based on mode & island
-    const filteredRegions = regions.filter((r) => {
+    const filteredRegions = combinedRegions.filter((r) => {
       const d = rainfallDataMap[r.id];
       if (selectedIsland !== 'all' && r.island !== selectedIsland) return false;
       if (filterMode === 'raining') return d && d.currentRainfall > 0;
@@ -165,6 +298,7 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
       const rain = data ? data.currentRainfall : 0;
       const isFav = favoriteIds.includes(reg.id);
       const isSelected = selectedRegion?.id === reg.id;
+      const isKecamatan = reg.type === 'Kecamatan';
       const severity = data?.alertSeverity || 'normal';
 
       // Determine colors based on BMKG standards
@@ -194,7 +328,10 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
 
       // Dynamic radar wave circle for active rainfall
       if (showRadarWave && rain > 0 && radarLayerRef.current) {
-        const radius = Math.min(45000, 12000 + rain * 1500);
+        const radius = isKecamatan 
+          ? Math.min(25000, 8000 + rain * 1000)
+          : Math.min(45000, 12000 + rain * 1500);
+          
         const radarCircle = L.circle([reg.lat, reg.lng], {
           radius,
           color: pinColor,
@@ -206,17 +343,25 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
         radarCircle.addTo(radarLayerRef.current);
       }
 
-      // Custom HTML Marker icon
+      // Custom HTML Marker icon (Distinct design for Kecamatan vs Kota)
+      const markerSize = isKecamatan ? 28 : 32;
       const markerHtml = `
         <div class="relative group cursor-pointer flex items-center justify-center -translate-x-1/2 -translate-y-1/2">
           ${rain > 5 ? `<div class="absolute w-10 h-10 rounded-full ${pulseAnimClass}" style="background: ${haloColor};"></div>` : ''}
-          <div class="relative flex items-center justify-center w-8 h-8 rounded-full border-2 ${
-            isSelected ? 'border-white ring-4 ring-cyan-400 scale-125 z-30' : 'border-slate-900 shadow-md'
+          
+          <div class="relative flex items-center justify-center ${isKecamatan ? 'w-7 h-7' : 'w-8 h-8'} rounded-full border-2 ${
+            isSelected 
+              ? 'border-white ring-4 ring-cyan-400 scale-125 z-30' 
+              : isKecamatan 
+                ? 'border-cyan-400/80 shadow-lg' 
+                : 'border-slate-900 shadow-md'
           } transition-all duration-300" style="background-color: ${pinColor};">
-            <span class="text-[10px] font-bold text-white tracking-tighter">
+            <span class="text-[9px] font-bold text-white tracking-tighter">
               ${rain > 0 ? (rain >= 10 ? Math.round(rain) : rain.toFixed(1)) : '0'}
             </span>
           </div>
+
+          ${isKecamatan ? '<div class="absolute -bottom-2 px-1 py-0.2 bg-cyan-950 text-cyan-300 border border-cyan-700 text-[7px] font-extrabold rounded uppercase tracking-tight shadow">KEC</div>' : ''}
           ${isFav ? '<div class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-rose-500 rounded-full flex items-center justify-center text-[8px] text-white border border-slate-900">♥</div>' : ''}
         </div>
       `;
@@ -224,21 +369,25 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
       const customIcon = L.divIcon({
         html: markerHtml,
         className: 'custom-weather-marker',
-        iconSize: [32, 32],
-        iconAnchor: [16, 16],
+        iconSize: [markerSize, markerSize],
+        iconAnchor: [markerSize / 2, markerSize / 2],
       });
 
       const marker = L.marker([reg.lat, reg.lng], { icon: customIcon });
 
       // Popup content with rich info
       const popupContent = `
-        <div class="p-3 bg-slate-900 text-slate-100 rounded-lg shadow-xl font-sans min-w-[220px] max-w-[280px] border border-slate-700">
+        <div class="p-3 bg-slate-900 text-slate-100 rounded-lg shadow-xl font-sans min-w-[220px] max-w-[280px] border ${isKecamatan ? 'border-cyan-500/60' : 'border-slate-700'}">
           <div class="flex items-start justify-between gap-2 border-b border-slate-800 pb-2 mb-2">
             <div>
-              <div class="text-xs text-cyan-400 font-semibold uppercase tracking-wider">${reg.province}</div>
+              <div class="flex items-center gap-1 text-[10px] text-cyan-400 font-bold uppercase tracking-wider">
+                ${isKecamatan ? '<span class="px-1 py-0.2 bg-cyan-950 text-cyan-300 border border-cyan-800 rounded text-[8px]">KECAMATAN</span>' : ''}
+                ${reg.province}
+              </div>
               <div class="text-sm font-bold text-white flex items-center gap-1">
                 ${reg.name}
               </div>
+              <div class="text-[10px] text-slate-400">${reg.elevationMeters} mdpl &bull; ${reg.timezone}</div>
             </div>
             <span class="px-2 py-0.5 text-[10px] font-bold rounded-full ${
               severity === 'awas' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' :
@@ -275,8 +424,8 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
           </div>
 
           <div class="flex items-center gap-1.5">
-            <button id="btn-select-${reg.id}" class="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold py-1.5 px-3 rounded transition flex items-center justify-center gap-1">
-              Buka Analisis
+            <button id="btn-select-${reg.id}" class="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold py-1.5 px-3 rounded transition flex items-center justify-center gap-1 shadow-md">
+              ${isSelected ? '✓ Wilayah Terpilih' : '🎯 Pilih & Buka Grafik'}
             </button>
             <button id="btn-fav-${reg.id}" class="p-1.5 ${isFav ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-rose-400'} rounded border border-slate-700 transition">
               ♥
@@ -296,7 +445,7 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
 
         if (selectBtn) {
           selectBtn.onclick = () => {
-            onSelectRegion(reg);
+            handleSelectKecamatanOnMap(reg);
             marker.closePopup();
           };
         }
@@ -318,6 +467,8 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
     });
   }, [
     regions,
+    pinnedKecamatans,
+    showKecamatanLayer,
     rainfallDataMap,
     selectedRegion,
     filterMode,
@@ -330,41 +481,74 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
   ]);
 
   return (
-    <div className="relative w-full h-[520px] lg:h-[600px] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl">
+    <div className="relative w-full h-[540px] lg:h-[620px] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl">
       {/* Map Target Container */}
       <div ref={mapContainerRef} className="w-full h-full z-0" />
 
       {/* Top Floating Control Bar */}
       <div className="absolute top-3 left-3 right-3 z-10 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
-        {/* Island Filters */}
-        <div className="flex items-center gap-1 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/80 shadow-lg pointer-events-auto overflow-x-auto max-w-full">
+        {/* Left Actions: Island Filters & Kecamatan Search Trigger */}
+        <div className="flex items-center gap-1.5 pointer-events-auto flex-wrap">
+          {/* Kecamatan Search & Presets Button */}
           <button
-            onClick={() => handleIslandFilter('all')}
-            className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition whitespace-nowrap ${
-              selectedIsland === 'all'
-                ? 'bg-cyan-600 text-white shadow-md'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+            onClick={() => setIsSearchPanelOpen(!isSearchPanelOpen)}
+            className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 shadow-lg backdrop-blur-md transition ${
+              isSearchPanelOpen
+                ? 'bg-cyan-500 text-slate-950 border-cyan-400'
+                : 'bg-slate-900/90 text-cyan-300 border-cyan-500/60 hover:bg-slate-800'
             }`}
           >
-            🇮🇩 Seluruh Indonesia
+            <Building2 className="w-3.5 h-3.5" />
+            <span>Pilih Per Kecamatan</span>
+            <span className="text-[10px] px-1.5 py-0.2 bg-cyan-950 text-cyan-300 rounded font-mono border border-cyan-800">
+              Se-Indonesia
+            </span>
           </button>
-          {['Sumatera', 'Jawa', 'Kalimantan', 'Sulawesi', 'Bali & Nusa Tenggara', 'Maluku & Papua'].map((island) => (
+
+          {/* Island Filters */}
+          <div className="flex items-center gap-1 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/80 shadow-lg overflow-x-auto max-w-full">
             <button
-              key={island}
-              onClick={() => handleIslandFilter(island)}
-              className={`px-2 py-1 text-xs font-medium rounded-lg transition whitespace-nowrap ${
-                selectedIsland === island
+              onClick={() => handleIslandFilter('all')}
+              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition whitespace-nowrap ${
+                selectedIsland === 'all'
                   ? 'bg-cyan-600 text-white shadow-md'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
-              {island}
+              🇮🇩 Seluruh Indonesia
             </button>
-          ))}
+            {['Sumatera', 'Jawa', 'Kalimantan', 'Sulawesi', 'Bali & Nusa Tenggara', 'Maluku & Papua'].map((island) => (
+              <button
+                key={island}
+                onClick={() => handleIslandFilter(island)}
+                className={`px-2 py-1 text-xs font-medium rounded-lg transition whitespace-nowrap ${
+                  selectedIsland === island
+                    ? 'bg-cyan-600 text-white shadow-md'
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                }`}
+              >
+                {island}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Layer & Filter Buttons */}
+        {/* Right Layer & Filter Buttons */}
         <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/80 shadow-lg pointer-events-auto">
+          {/* Toggle Kecamatan Layer */}
+          <button
+            onClick={() => setShowKecamatanLayer(!showKecamatanLayer)}
+            className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 font-medium transition ${
+              showKecamatanLayer
+                ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-300 font-bold'
+                : 'bg-slate-800/80 border-slate-700 text-slate-400'
+            }`}
+            title="Tampilkan / Sembunyikan Titik Kecamatan di Peta"
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Titik Kec. ({pinnedKecamatans.length})</span>
+          </button>
+
           {/* Filter Status Mode */}
           <div className="flex bg-slate-950 rounded-lg p-0.5 border border-slate-800">
             <button
@@ -440,6 +624,135 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
         </div>
       </div>
 
+      {/* Floating Kecamatan Search & Selection Panel on Map */}
+      {isSearchPanelOpen && (
+        <div className="absolute top-16 left-3 z-20 w-80 sm:w-96 bg-slate-900/95 backdrop-blur-md border border-cyan-500/50 rounded-2xl p-3.5 shadow-2xl space-y-3 pointer-events-auto animate-in fade-in zoom-in-95">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-cyan-400" />
+              <span className="text-xs font-bold text-white">Cari & Pilih Kecamatan di Peta</span>
+            </div>
+            <button
+              onClick={() => setIsSearchPanelOpen(false)}
+              className="text-slate-400 hover:text-white p-1 rounded-lg"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Tab Switcher */}
+          <div className="grid grid-cols-2 gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <button
+              onClick={() => setActiveKecamatanTab('presets')}
+              className={`py-1 text-xs font-semibold rounded-lg transition ${
+                activeKecamatanTab === 'presets'
+                  ? 'bg-cyan-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Kecamatan Populer
+            </button>
+            <button
+              onClick={() => setActiveKecamatanTab('search')}
+              className={`py-1 text-xs font-semibold rounded-lg transition ${
+                activeKecamatanTab === 'search'
+                  ? 'bg-cyan-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Cari Se-Indonesia
+            </button>
+          </div>
+
+          {/* Search Box */}
+          {activeKecamatanTab === 'search' && (
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Ketik nama kecamatan (Menteng, Sukajadi, Lembang, Ubud, Cisarua)..."
+                  value={kecamatanSearchQuery}
+                  onChange={(e) => setKecamatanSearchQuery(e.target.value)}
+                  className="w-full pl-8 pr-8 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                  autoFocus
+                />
+                {isSearchingKecamatan && (
+                  <Loader2 className="w-3.5 h-3.5 text-cyan-400 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
+                )}
+              </div>
+
+              {/* Search Results */}
+              <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                {kecamatanSearchResults.length === 0 ? (
+                  <div className="text-center py-4 text-[11px] text-slate-400">
+                    {kecamatanSearchQuery.length >= 2
+                      ? (isSearchingKecamatan ? 'Sedang mencari kecamatan...' : 'Tidak ditemukan kecamatan dengan nama tersebut.')
+                      : 'Ketik minimal 2 huruf untuk mencari lebih dari 7.000+ kecamatan se-Indonesia.'}
+                  </div>
+                ) : (
+                  kecamatanSearchResults.map((kec) => (
+                    <button
+                      key={kec.id}
+                      onClick={() => handleSelectKecamatanOnMap(kec)}
+                      className="w-full text-left p-2 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-cyan-500/60 hover:bg-slate-800 flex items-center justify-between transition group"
+                    >
+                      <div className="overflow-hidden">
+                        <div className="text-xs font-bold text-white group-hover:text-cyan-300 truncate">
+                          {kec.name}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {kec.province} &bull; {kec.elevationMeters} mdpl
+                        </div>
+                      </div>
+                      <Navigation className="w-3.5 h-3.5 text-cyan-400 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Preset Buttons */}
+          {activeKecamatanTab === 'presets' && (
+            <div className="space-y-1.5">
+              <div className="text-[10px] text-slate-400">Pilih cepat kecamatan observasi utama:</div>
+              <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                {POPULAR_KECAMATAN_PRESETS.map((kec) => {
+                  const isSelected = selectedRegion?.id === kec.id;
+                  const data = rainfallDataMap[kec.id];
+                  return (
+                    <button
+                      key={kec.id}
+                      onClick={() => handleSelectKecamatanOnMap(kec)}
+                      className={`w-full text-left p-2 rounded-xl border flex items-center justify-between transition ${
+                        isSelected
+                          ? 'bg-cyan-950 border-cyan-500 text-white'
+                          : 'bg-slate-950/80 border-slate-800 text-slate-200 hover:bg-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div>
+                        <div className="text-xs font-bold text-white">{kec.name}</div>
+                        <div className="text-[10px] text-slate-400">{kec.province} &bull; {kec.elevationMeters} mdpl</div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+                          {data ? `${data.currentRainfall} mm` : 'Lihat'}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="pt-1 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-500">
+            <span>💡 Klik titik mana saja di peta untuk menganalisis</span>
+          </div>
+        </div>
+      )}
+
       {/* Bottom Floating Legend */}
       <div className="absolute bottom-3 left-3 z-10 pointer-events-auto">
         <div className="bg-slate-900/90 backdrop-blur-md p-2.5 rounded-xl border border-slate-700/80 shadow-2xl max-w-sm">
@@ -493,7 +806,14 @@ export const RainfallMap: React.FC<RainfallMapProps> = ({
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping"></div>
             <div>
-              <div className="text-[10px] text-slate-400">{selectedRegion.province}</div>
+              <div className="text-[10px] text-cyan-400 flex items-center gap-1">
+                {selectedRegion.type === 'Kecamatan' && (
+                  <span className="px-1 py-0.2 bg-cyan-950 text-cyan-300 border border-cyan-800 rounded text-[8px] font-bold">
+                    KECAMATAN
+                  </span>
+                )}
+                <span>{selectedRegion.province}</span>
+              </div>
               <div className="text-xs font-bold text-white">{selectedRegion.name}</div>
             </div>
           </div>
