@@ -96,3 +96,35 @@ export interface UserPreferences {
   autoRefreshIntervalSeconds: number; // e.g. 60s
   mapTileLayer: 'voyager' | 'dark' | 'osm' | 'satellite';
 }
+
+export interface HistoricalDailyData {
+  date: string;
+  dayName: string;
+  rainfall: number; // mm
+  maxTemp: number; // °C
+  minTemp: number; // °C
+  maxWindSpeed: number; // km/h
+  weatherCode: number;
+  weatherDescription: string;
+  intensityCategory: string; // Berawan, Hujan Ringan, Sedang, Lebat, Sangat Lebat/Ekstrem
+}
+
+export interface MonthHistorySummary {
+  regionId: string;
+  regionName: string;
+  province: string;
+  island: IslandGroup;
+  stationCode: string;
+  lat: number;
+  lng: number;
+  elevationMeters: number;
+  totalRainfall30d: number;
+  maxDailyRain: number;
+  maxDailyRainDate: string;
+  averageDailyRain: number;
+  rainyDaysCount: number;
+  heavyRainDaysCount: number;
+  extremeRainDaysCount: number;
+  dailyList: HistoricalDailyData[];
+}
+

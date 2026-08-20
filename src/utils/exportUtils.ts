@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Region, LiveRainfallData, EarlyWarningAlert } from '../types';
+import { Region, LiveRainfallData, EarlyWarningAlert, MonthHistorySummary } from '../types';
 
 export function exportToCSV(
   regions: Region[],
@@ -383,3 +383,328 @@ export function exportToPDF(
 
   doc.save(`Laporan_Peringatan_Hujan_Indonesia_${now.toISOString().split('T')[0]}.pdf`);
 }
+
+// ----------------------------------------------------
+// EXPORT 30 HARI TERAKHIR (HISTORIS BULANAN)
+// ----------------------------------------------------
+
+export function export30DaysToExcel(
+  histories: MonthHistorySummary[],
+  selectedRegion?: Region
+) {
+  const wb = XLSX.utils.book_new();
+  const dateStr = new Date().toISOString().split('T')[0];
+
+  const safeAppendSheet = (workbook: XLSX.WorkBook, sheet: XLSX.WorkSheet, rawName: string) => {
+    const cleanName = (rawName || 'Sheet')
+      .replace(/[\\/?*[\]:]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 25);
+    XLSX.utils.book_append_sheet(workbook, sheet, cleanName);
+  };
+
+  // Sheet 1: Rekap 30 Hari Seluruh Wilayah
+  const summaryRows = histories.map((h, idx) => ({
+    No: idx + 1,
+    'Wilayah / Kota': h.regionName,
+    Provinsi: h.province,
+    Pulau: h.island,
+    'Kode Stasiun': h.stationCode,
+    'Total Hujan 30 Hari (mm)': h.totalRainfall30d,
+    'Rata-rata Harian (mm/hari)': h.averageDailyRain,
+    'Hujan Maksimum Harian (mm)': h.maxDailyRain,
+    'Tanggal Hujan Maksimum': h.maxDailyRainDate,
+    'Hari Hujan (>0.5 mm)': `${h.rainyDaysCount} Hari`,
+    'Hari Hujan Lebat (≥20 mm)': `${h.heavyRainDaysCount} Hari`,
+    'Hari Sangat Lebat (≥50 mm)': `${h.extremeRainDaysCount} Hari`,
+    Latitude: h.lat,
+    Longitude: h.lng,
+    Elevasi: `${h.elevationMeters} mdpl`,
+  }));
+
+  const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+  safeAppendSheet(wb, wsSummary, 'Rekap 30 Hari');
+
+  // Sheet 2: Detail Harian untuk Wilayah Terpilih (atau wilayah pertama)
+  const targetHistory = selectedRegion 
+    ? histories.find(h => h.regionId === selectedRegion.id) || histories[0]
+    : histories[0];
+
+  if (targetHistory && targetHistory.dailyList.length > 0) {
+    const dailyRows = targetHistory.dailyList.map((d, idx) => ({
+      No: idx + 1,
+      Wilayah: targetHistory.regionName,
+      Tanggal: d.date,
+      Hari: d.dayName,
+      'Curah Hujan (mm)': d.rainfall,
+      'Kategori Intensitas': d.intensityCategory,
+      'Suhu Maks (°C)': d.maxTemp,
+      'Suhu Min (°C)': d.minTemp,
+      'Kecepatan Angin Maks (km/j)': d.maxWindSpeed,
+      'Kondisi Cuaca': d.weatherDescription,
+    }));
+
+    const wsDaily = XLSX.utils.json_to_sheet(dailyRows);
+    safeAppendSheet(wb, wsDaily, 'Detail Harian 30 Hari');
+  }
+
+  const fileName = `Rekap_Curah_Hujan_30_Hari_${dateStr}.xlsx`;
+
+  try {
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 500);
+  } catch (e) {
+    console.warn('Fallback to XLSX.writeFile:', e);
+    XLSX.writeFile(wb, fileName);
+  }
+}
+
+export function export30DaysToCSV(
+  histories: MonthHistorySummary[],
+  selectedRegion?: Region
+) {
+  const dateStr = new Date().toISOString().split('T')[0];
+
+  // If single region is targeted, output its full 30 days daily logs. If multiple, output all daily records.
+  const targetHistories = (selectedRegion && histories.length === 1) ? histories : histories;
+
+  const headers = [
+    'No',
+    'Wilayah',
+    'Provinsi',
+    'Pulau',
+    'Kode Stasiun',
+    'Tanggal',
+    'Hari',
+    'Curah Hujan (mm)',
+    'Kategori Intensitas',
+    'Suhu Maks (°C)',
+    'Suhu Min (°C)',
+    'Kecepatan Angin Maks (km/j)',
+    'Kondisi Cuaca'
+  ];
+
+  let rowCounter = 1;
+  const rows: string[] = [];
+
+  for (const h of targetHistories) {
+    for (const d of h.dailyList) {
+      rows.push([
+        rowCounter++,
+        `"${h.regionName}"`,
+        `"${h.province}"`,
+        `"${h.island}"`,
+        `"${h.stationCode}"`,
+        `"${d.date}"`,
+        `"${d.dayName}"`,
+        d.rainfall,
+        `"${d.intensityCategory}"`,
+        d.maxTemp,
+        d.minTemp,
+        d.maxWindSpeed,
+        `"${d.weatherDescription}"`
+      ].join(','));
+    }
+  }
+
+  const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.style.display = 'none';
+  a.href = url;
+  a.download = `Data_Historis_Curah_Hujan_30_Hari_${dateStr}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 500);
+}
+
+export function export30DaysToPDF(
+  histories: MonthHistorySummary[],
+  selectedRegion?: Region
+) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const now = new Date();
+  const dateFormatted = now.toLocaleDateString('id-ID', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  // Header Banner
+  doc.setFillColor(15, 23, 42); // slate-900
+  doc.rect(0, 0, 210, 32, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.text('HUJAN NUSANTARA - BULETIN HISTORIS 30 HARI TERAKHIR', 14, 13);
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(148, 163, 184);
+  doc.text(`Laporan Rekapitulasi Presipitasi & Dinamika Iklim Bulanan | Diterbitkan: ${dateFormatted}`, 14, 21);
+  doc.text('Sumber Data: Observasi Meteorologi Terpadu & Reanalisis Presipitasi', 14, 27);
+
+  let yPos = 38;
+
+  // If single region is focused
+  const targetHistory = selectedRegion 
+    ? histories.find(h => h.regionId === selectedRegion.id) || histories[0]
+    : histories[0];
+
+  if (histories.length === 1 && targetHistory) {
+    // Detailed Focus Region Box
+    doc.setFillColor(241, 245, 249);
+    doc.roundedRect(14, yPos, 182, 32, 2, 2, 'F');
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text(`REKAPITULASI 30 HARI: ${targetHistory.regionName.toUpperCase()} (${targetHistory.province})`, 18, yPos + 8);
+
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(51, 65, 85);
+    const l1 = `Total Akumulasi 30 Hari: ${targetHistory.totalRainfall30d} mm | Rata-rata Harian: ${targetHistory.averageDailyRain} mm/hari`;
+    const l2 = `Hujan Harian Tertinggi: ${targetHistory.maxDailyRain} mm (Tanggal ${targetHistory.maxDailyRainDate})`;
+    const l3 = `Jumlah Hari Hujan: ${targetHistory.rainyDaysCount} Hari | Hari Lebat (≥20mm): ${targetHistory.heavyRainDaysCount} Hari | Hari Ekstrem (≥50mm): ${targetHistory.extremeRainDaysCount} Hari`;
+    doc.text(l1, 18, yPos + 15);
+    doc.text(l2, 18, yPos + 21);
+    doc.text(l3, 18, yPos + 27);
+
+    yPos += 38;
+
+    // Daily Table
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text('RINCIAN CURAH HUJAN HARIAN (30 HARI TERAKHIR)', 14, yPos);
+    yPos += 4;
+
+    const tableData = targetHistory.dailyList.map((d, i) => [
+      (i + 1).toString(),
+      d.date,
+      d.dayName,
+      `${d.rainfall} mm`,
+      d.intensityCategory,
+      `${d.minTemp}°C - ${d.maxTemp}°C`,
+      `${d.maxWindSpeed} km/j`,
+      d.weatherDescription,
+    ]);
+
+    autoTable(doc, {
+      startY: yPos,
+      head: [['No', 'Tanggal', 'Hari', 'Curah Hujan', 'Kategori', 'Rentang Suhu', 'Angin Maks', 'Kondisi Cuaca']],
+      body: tableData,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [30, 41, 59],
+        textColor: [255, 255, 255],
+        fontSize: 7.5,
+        fontStyle: 'bold',
+        halign: 'center',
+      },
+      bodyStyles: {
+        fontSize: 7,
+        textColor: [51, 65, 85],
+      },
+      columnStyles: {
+        0: { cellWidth: 8, halign: 'center' },
+        1: { cellWidth: 22, halign: 'center' },
+        2: { cellWidth: 18 },
+        3: { cellWidth: 22, halign: 'right', fontStyle: 'bold' },
+        4: { cellWidth: 32 },
+        5: { cellWidth: 26, halign: 'center' },
+        6: { cellWidth: 20, halign: 'center' },
+        7: { cellWidth: 34 },
+      },
+    });
+  } else {
+    // Multi Region Summary Table
+    doc.setFontSize(10.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text('REKAPITULASI CURAH HUJAN 30 HARI SE-INDONESIA', 14, yPos);
+    yPos += 4;
+
+    const tableData = histories.map((h, i) => [
+      (i + 1).toString(),
+      h.regionName,
+      h.province,
+      `${h.totalRainfall30d} mm`,
+      `${h.averageDailyRain} mm`,
+      `${h.maxDailyRain} mm`,
+      `${h.rainyDaysCount} hr`,
+      `${h.heavyRainDaysCount} hr`,
+      `${h.extremeRainDaysCount} hr`,
+    ]);
+
+    autoTable(doc, {
+      startY: yPos,
+      head: [['No', 'Wilayah', 'Provinsi', 'Total 30 Hari', 'Rata-Rata', 'Harian Maks', 'Hari Hujan', 'Hari Lebat', 'Hari Ekstrem']],
+      body: tableData,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [30, 41, 59],
+        textColor: [255, 255, 255],
+        fontSize: 7.5,
+        fontStyle: 'bold',
+        halign: 'center',
+      },
+      bodyStyles: {
+        fontSize: 7,
+        textColor: [51, 65, 85],
+      },
+      columnStyles: {
+        0: { cellWidth: 8, halign: 'center' },
+        1: { cellWidth: 32 },
+        2: { cellWidth: 28 },
+        3: { cellWidth: 22, halign: 'right', fontStyle: 'bold' },
+        4: { cellWidth: 18, halign: 'right' },
+        5: { cellWidth: 20, halign: 'right' },
+        6: { cellWidth: 18, halign: 'center' },
+        7: { cellWidth: 18, halign: 'center' },
+        8: { cellWidth: 18, halign: 'center' },
+      },
+    });
+  }
+
+  // Footer / Page numbers
+  const pageCount = (doc as unknown as { internal: { getNumberOfPages: () => number } }).internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(148, 163, 184);
+    doc.text(
+      'Buletin Historis Cuaca Hujan Nusantara - Halaman ' + i + ' dari ' + pageCount,
+      14,
+      290
+    );
+  }
+
+  doc.save(`Laporan_Historis_30_Hari_${now.toISOString().split('T')[0]}.pdf`);
+}
+

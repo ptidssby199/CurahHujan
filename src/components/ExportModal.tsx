@@ -1,18 +1,31 @@
 import React, { useState } from 'react';
 import { Region, LiveRainfallData, EarlyWarningAlert } from '../types';
-import { exportToExcel, exportToCSV, exportToPDF } from '../utils/exportUtils';
+import { 
+  exportToExcel, 
+  exportToCSV, 
+  exportToPDF, 
+  export30DaysToExcel, 
+  export30DaysToCSV, 
+  export30DaysToPDF 
+} from '../utils/exportUtils';
+import { 
+  fetch30DaysHistoryForRegion, 
+  fetch30DaysHistoryForMultipleRegions 
+} from '../services/weatherService';
 import { 
   FileSpreadsheet, 
   FileText, 
   Download, 
   X, 
   CheckCircle2, 
-  Sparkles, 
   Layers, 
   MapPin, 
   AlertTriangle,
   FileCode,
-  AlertCircle
+  AlertCircle,
+  Calendar,
+  Zap,
+  Loader2
 } from 'lucide-react';
 
 interface ExportModalProps {
@@ -32,102 +45,138 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   alerts,
   selectedRegion,
 }) => {
+  const [timeRange, setTimeRange] = useState<'realtime' | '30days'>('realtime');
   const [exportScope, setExportScope] = useState<'all' | 'selected' | 'alerts_only'>('all');
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [loadingProgress, setLoadingProgress] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleExportExcel = () => {
+  const getTargetRegions = (): Region[] => {
+    if (exportScope === 'selected') {
+      return [selectedRegion];
+    } else if (exportScope === 'alerts_only') {
+      const alertRegions = regions.filter((r) => {
+        const d = rainfallDataMap[r.id];
+        return d && d.alertSeverity !== 'normal';
+      });
+      return alertRegions.length > 0 ? alertRegions : [selectedRegion];
+    }
+    return regions;
+  };
+
+  const handleExportExcel = async () => {
     setIsExporting(true);
     setErrorMessage(null);
+    setLoadingProgress(null);
     try {
-      let targetRegions = regions;
-      if (exportScope === 'selected') {
-        targetRegions = [selectedRegion];
-      } else if (exportScope === 'alerts_only') {
-        targetRegions = regions.filter((r) => {
-          const d = rainfallDataMap[r.id];
-          return d && d.alertSeverity !== 'normal';
-        });
+      const targetRegions = getTargetRegions();
+
+      if (timeRange === '30days') {
+        setLoadingProgress('Mengambil data historis 30 hari...');
+        const histories = targetRegions.length === 1
+          ? [await fetch30DaysHistoryForRegion(targetRegions[0])]
+          : await fetch30DaysHistoryForMultipleRegions(targetRegions, (done, total) => {
+              setLoadingProgress(`Mengambil data historis (${done}/${total} stasiun)...`);
+            });
+
+        export30DaysToExcel(histories, selectedRegion);
+        setSuccessMessage('File Excel historis 30 hari berhasil diunduh!');
+      } else {
+        exportToExcel(
+          targetRegions,
+          rainfallDataMap,
+          selectedRegion,
+          rainfallDataMap[selectedRegion.id]
+        );
+        setSuccessMessage('File Excel (.xlsx) berhasil diunduh!');
       }
 
-      exportToExcel(
-        targetRegions,
-        rainfallDataMap,
-        selectedRegion,
-        rainfallDataMap[selectedRegion.id]
-      );
-      setSuccessMessage('File Excel (.xlsx) berhasil diunduh!');
-      setTimeout(() => setSuccessMessage(null), 3500);
+      setTimeout(() => setSuccessMessage(null), 4000);
     } catch (e: any) {
       console.error(e);
       setErrorMessage(`Gagal mengunduh Excel: ${e?.message || 'Terjadi kesalahan sistem'}`);
     } finally {
       setIsExporting(false);
+      setLoadingProgress(null);
     }
   };
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     setIsExporting(true);
     setErrorMessage(null);
+    setLoadingProgress(null);
     try {
-      let targetRegions = regions;
-      if (exportScope === 'selected') {
-        targetRegions = [selectedRegion];
-      } else if (exportScope === 'alerts_only') {
-        targetRegions = regions.filter((r) => {
-          const d = rainfallDataMap[r.id];
-          return d && d.alertSeverity !== 'normal';
-        });
+      const targetRegions = getTargetRegions();
+
+      if (timeRange === '30days') {
+        setLoadingProgress('Mengambil data historis 30 hari...');
+        const histories = targetRegions.length === 1
+          ? [await fetch30DaysHistoryForRegion(targetRegions[0])]
+          : await fetch30DaysHistoryForMultipleRegions(targetRegions, (done, total) => {
+              setLoadingProgress(`Mengambil data historis (${done}/${total} stasiun)...`);
+            });
+
+        export30DaysToCSV(histories, selectedRegion);
+        setSuccessMessage('File CSV historis 30 hari berhasil diunduh!');
+      } else {
+        exportToCSV(targetRegions, rainfallDataMap);
+        setSuccessMessage('File CSV berhasil diunduh!');
       }
 
-      exportToCSV(targetRegions, rainfallDataMap);
-      setSuccessMessage('File CSV berhasil diunduh!');
-      setTimeout(() => setSuccessMessage(null), 3500);
+      setTimeout(() => setSuccessMessage(null), 4000);
     } catch (e: any) {
       console.error(e);
       setErrorMessage(`Gagal mengunduh CSV: ${e?.message || 'Terjadi kesalahan'}`);
     } finally {
       setIsExporting(false);
+      setLoadingProgress(null);
     }
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     setIsExporting(true);
     setErrorMessage(null);
+    setLoadingProgress(null);
     try {
-      let targetRegions = regions;
-      if (exportScope === 'selected') {
-        targetRegions = [selectedRegion];
-      } else if (exportScope === 'alerts_only') {
-        targetRegions = regions.filter((r) => {
-          const d = rainfallDataMap[r.id];
-          return d && d.alertSeverity !== 'normal';
-        });
+      const targetRegions = getTargetRegions();
+
+      if (timeRange === '30days') {
+        setLoadingProgress('Menyusun buletin historis 30 hari...');
+        const histories = targetRegions.length === 1
+          ? [await fetch30DaysHistoryForRegion(targetRegions[0])]
+          : await fetch30DaysHistoryForMultipleRegions(targetRegions, (done, total) => {
+              setLoadingProgress(`Mengambil data historis (${done}/${total} stasiun)...`);
+            });
+
+        export30DaysToPDF(histories, selectedRegion);
+        setSuccessMessage('Buletin PDF historis 30 hari berhasil diunduh!');
+      } else {
+        exportToPDF(
+          targetRegions,
+          rainfallDataMap,
+          alerts,
+          selectedRegion,
+          rainfallDataMap[selectedRegion.id]
+        );
+        setSuccessMessage('Laporan PDF resmi berhasil dibuat & diunduh!');
       }
 
-      exportToPDF(
-        targetRegions,
-        rainfallDataMap,
-        alerts,
-        selectedRegion,
-        rainfallDataMap[selectedRegion.id]
-      );
-      setSuccessMessage('Laporan PDF resmi berhasil dibuat & diunduh!');
-      setTimeout(() => setSuccessMessage(null), 3500);
+      setTimeout(() => setSuccessMessage(null), 4000);
     } catch (e: any) {
       console.error(e);
       setErrorMessage(`Gagal membuat PDF: ${e?.message || 'Terjadi kesalahan'}`);
     } finally {
       setIsExporting(false);
+      setLoadingProgress(null);
     }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
@@ -140,57 +189,95 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg"
+            className="text-slate-400 hover:text-white p-1 rounded-lg transition"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Scope Selection */}
-        <div className="space-y-2">
+        {/* Time Range Selection */}
+        <div className="space-y-1.5">
           <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
-            Pilih Cakupan Data:
+            Pilihan Rentang Waktu Data:
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setTimeRange('realtime')}
+              className={`p-2.5 rounded-xl border text-left transition ${
+                timeRange === 'realtime'
+                  ? 'bg-cyan-950/90 border-cyan-500 text-white shadow-md'
+                  : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:bg-slate-800'
+              }`}
+            >
+              <div className="text-xs font-bold flex items-center gap-1.5 mb-0.5">
+                <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                Real-Time & 7 Hari
+              </div>
+              <div className="text-[10px] text-slate-400">Data live 24 jam & perkiraan cuaca</div>
+            </button>
+
+            <button
+              onClick={() => setTimeRange('30days')}
+              className={`p-2.5 rounded-xl border text-left transition ${
+                timeRange === '30days'
+                  ? 'bg-cyan-950/90 border-cyan-500 text-white shadow-md'
+                  : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:bg-slate-800'
+              }`}
+            >
+              <div className="text-xs font-bold flex items-center gap-1.5 mb-0.5">
+                <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                30 Hari Terakhir
+              </div>
+              <div className="text-[10px] text-slate-400">Rekapitulasi historis 1 bulan penuh</div>
+            </button>
+          </div>
+        </div>
+
+        {/* Scope Selection */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+            Pilih Cakupan Wilayah:
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <button
               onClick={() => setExportScope('all')}
-              className={`p-3 rounded-xl border text-left transition ${
+              className={`p-2.5 rounded-xl border text-left transition ${
                 exportScope === 'all'
                   ? 'bg-cyan-950/80 border-cyan-500 text-white shadow-md'
                   : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'
               }`}
             >
-              <div className="text-xs font-bold flex items-center gap-1.5 mb-1">
+              <div className="text-xs font-bold flex items-center gap-1.5 mb-0.5">
                 <Layers className="w-3.5 h-3.5 text-cyan-400" />
-                Seluruh Wilayah
+                Semua Stasiun
               </div>
-              <div className="text-[10px] text-slate-400">38+ Stasiun se-Indonesia</div>
+              <div className="text-[10px] text-slate-400">38+ Stasiun Indonesia</div>
             </button>
 
             <button
               onClick={() => setExportScope('selected')}
-              className={`p-3 rounded-xl border text-left transition ${
+              className={`p-2.5 rounded-xl border text-left transition ${
                 exportScope === 'selected'
                   ? 'bg-cyan-950/80 border-cyan-500 text-white shadow-md'
                   : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'
               }`}
             >
-              <div className="text-xs font-bold flex items-center gap-1.5 mb-1">
+              <div className="text-xs font-bold flex items-center gap-1.5 mb-0.5">
                 <MapPin className="w-3.5 h-3.5 text-cyan-400" />
-                Wilayah Terpilih
+                Wilayah Aktif
               </div>
               <div className="text-[10px] text-slate-400 truncate">{selectedRegion.name}</div>
             </button>
 
             <button
               onClick={() => setExportScope('alerts_only')}
-              className={`p-3 rounded-xl border text-left transition ${
+              className={`p-2.5 rounded-xl border text-left transition ${
                 exportScope === 'alerts_only'
                   ? 'bg-cyan-950/80 border-cyan-500 text-white shadow-md'
                   : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'
               }`}
             >
-              <div className="text-xs font-bold flex items-center gap-1.5 mb-1">
+              <div className="text-xs font-bold flex items-center gap-1.5 mb-0.5">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
                 Peringatan Saja
               </div>
@@ -200,14 +287,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         </div>
 
         {/* Export Buttons */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
           {/* Excel Export Button */}
           <button
             onClick={handleExportExcel}
             disabled={isExporting}
-            className="p-3.5 rounded-xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/60 to-slate-950 hover:border-emerald-400 text-left transition group shadow-lg"
+            className="p-3.5 rounded-xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/60 to-slate-950 hover:border-emerald-400 text-left transition group shadow-lg disabled:opacity-50"
           >
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-1.5">
               <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
                 <FileSpreadsheet className="w-4 h-4" />
               </div>
@@ -217,7 +304,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
             <div className="font-bold text-white text-xs">Spreadsheet Excel</div>
             <p className="text-[10px] text-slate-400 mt-1">
-              Multi-sheet lengkap historis & prakiraan.
+              {timeRange === '30days' ? 'Rekap 30 hari & detail harian.' : 'Multi-sheet live & prakiraan.'}
             </p>
           </button>
 
@@ -225,9 +312,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           <button
             onClick={handleExportCSV}
             disabled={isExporting}
-            className="p-3.5 rounded-xl border border-teal-500/40 bg-gradient-to-br from-teal-950/60 to-slate-950 hover:border-teal-400 text-left transition group shadow-lg"
+            className="p-3.5 rounded-xl border border-teal-500/40 bg-gradient-to-br from-teal-950/60 to-slate-950 hover:border-teal-400 text-left transition group shadow-lg disabled:opacity-50"
           >
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-1.5">
               <div className="w-8 h-8 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center">
                 <FileCode className="w-4 h-4" />
               </div>
@@ -237,7 +324,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
             <div className="font-bold text-white text-xs">Data CSV</div>
             <p className="text-[10px] text-slate-400 mt-1">
-              Format ringkas untuk analisis cepat.
+              {timeRange === '30days' ? 'Format baris harian 30 hari.' : 'Format ringkas analisis.'}
             </p>
           </button>
 
@@ -245,9 +332,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           <button
             onClick={handleExportPDF}
             disabled={isExporting}
-            className="p-3.5 rounded-xl border border-rose-500/40 bg-gradient-to-br from-rose-950/60 to-slate-950 hover:border-rose-400 text-left transition group shadow-lg"
+            className="p-3.5 rounded-xl border border-rose-500/40 bg-gradient-to-br from-rose-950/60 to-slate-950 hover:border-rose-400 text-left transition group shadow-lg disabled:opacity-50"
           >
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-1.5">
               <div className="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center">
                 <FileText className="w-4 h-4" />
               </div>
@@ -257,10 +344,18 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
             <div className="font-bold text-white text-xs">Buletin PDF</div>
             <p className="text-[10px] text-slate-400 mt-1">
-              Dokumen resmi standar BMKG/EWS.
+              {timeRange === '30days' ? 'Laporan iklim 30 hari resmi.' : 'Dokumen resmi BMKG/EWS.'}
             </p>
           </button>
         </div>
+
+        {/* Loading / Progress Indicator */}
+        {isExporting && (
+          <div className="p-3 bg-cyan-950/60 border border-cyan-500/50 text-cyan-300 rounded-xl text-xs flex items-center gap-2.5 animate-in fade-in">
+            <Loader2 className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />
+            <span className="font-medium">{loadingProgress || 'Sedang memproses dan mengunduh berkas...'}</span>
+          </div>
+        )}
 
         {/* Success Toast */}
         {successMessage && (
@@ -278,10 +373,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </div>
         )}
 
-        <div className="pt-2 flex justify-end">
+        <div className="pt-1 flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl"
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition"
           >
             Tutup
           </button>
@@ -290,4 +385,5 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     </div>
   );
 };
+
 
