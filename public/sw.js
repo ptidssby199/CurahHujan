@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hujannusantara-pwa-v1';
+const CACHE_NAME = 'hujannusantara-pwa-v2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -10,7 +10,7 @@ const ASSETS_TO_CACHE = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE).catch((err) => console.warn('PWA Cache warmup partial:', err));
+      return cache.addAll(ASSETS_TO_CACHE).catch((err) => console.warn('PWA Cache warmup:', err));
     })
   );
   self.skipWaiting();
@@ -32,36 +32,23 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Network first with cache fallback for API/Tiles, Cache first for static assets
-  const url = new URL(event.request.url);
+  if (event.request.method !== 'GET') return;
 
-  if (url.origin.includes('api.open-meteo.com') || url.origin.includes('basemaps.cartocdn.com') || url.origin.includes('tile.openstreetmap.org')) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          if (response && response.status === 200) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
-        })
-        .catch(() => caches.match(event.request))
-    );
-    return;
-  }
-
+  // Network First for HTML and app scripts so updates appear immediately
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      return (
-        cachedResponse ||
-        fetch(event.request).then((response) => {
-          if (response && response.status === 200 && event.request.method === 'GET') {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
-        })
-      );
-    })
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+        }
+        return networkResponse;
+      })
+      .catch(() => {
+        // Fallback to cache if offline
+        return caches.match(event.request);
+      })
   );
 });
