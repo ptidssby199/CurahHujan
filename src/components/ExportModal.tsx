@@ -4,13 +4,13 @@ import {
   exportToExcel, 
   exportToCSV, 
   exportToPDF, 
-  export30DaysToExcel, 
-  export30DaysToCSV, 
-  export30DaysToPDF 
+  exportHistoricalRangeToExcel, 
+  exportHistoricalRangeToCSV, 
+  exportHistoricalRangeToPDF 
 } from '../utils/exportUtils';
 import { 
-  fetch30DaysHistoryForRegion, 
-  fetch30DaysHistoryForMultipleRegions,
+  fetchDateRangeHistoryForRegion, 
+  fetchDateRangeHistoryForMultipleRegions,
   searchKecamatan,
   POPULAR_KECAMATAN_PRESETS
 } from '../services/weatherService';
@@ -30,7 +30,8 @@ import {
   Loader2,
   Building2,
   Search,
-  Check
+  Check,
+  CalendarRange
 } from 'lucide-react';
 
 interface ExportModalProps {
@@ -42,6 +43,13 @@ interface ExportModalProps {
   selectedRegion: Region;
 }
 
+const formatDateToInput = (d: Date): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export const ExportModal: React.FC<ExportModalProps> = ({
   isOpen,
   onClose,
@@ -50,9 +58,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   alerts,
   selectedRegion,
 }) => {
-  const [timeRange, setTimeRange] = useState<'realtime' | '30days'>('30days');
+  const [timeRange, setTimeRange] = useState<'realtime' | 'historical'>('historical');
   const [exportScope, setExportScope] = useState<'all' | 'selected' | 'kecamatan' | 'alerts_only'>('kecamatan');
   
+  // Date range states
+  const [datePreset, setDatePreset] = useState<'30days' | '14days' | '7days' | 'this_month' | 'custom'>('30days');
+  
+  const today = new Date();
+  const initStart = new Date();
+  initStart.setDate(today.getDate() - 29);
+
+  const [startDate, setStartDate] = useState<string>(formatDateToInput(initStart));
+  const [endDate, setEndDate] = useState<string>(formatDateToInput(today));
+
   // Kecamatan selection states
   const [selectedKecamatan, setSelectedKecamatan] = useState<Region>(POPULAR_KECAMATAN_PRESETS[0]);
   const [kecamatanQuery, setKecamatanQuery] = useState<string>('');
@@ -63,6 +81,41 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [loadingProgress, setLoadingProgress] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Apply preset date ranges
+  const applyPreset = (preset: '30days' | '14days' | '7days' | 'this_month') => {
+    setDatePreset(preset);
+    const now = new Date();
+    const eStr = formatDateToInput(now);
+    let s = new Date();
+
+    if (preset === '30days') {
+      s.setDate(now.getDate() - 29);
+    } else if (preset === '14days') {
+      s.setDate(now.getDate() - 13);
+    } else if (preset === '7days') {
+      s.setDate(now.getDate() - 6);
+    } else if (preset === 'this_month') {
+      s = new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+
+    setStartDate(formatDateToInput(s));
+    setEndDate(eStr);
+  };
+
+  // Calculate day count
+  const calculateDaysCount = (): number => {
+    try {
+      const s = new Date(startDate);
+      const e = new Date(endDate);
+      const diff = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      return diff > 0 ? diff : 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  const daysCount = calculateDaysCount();
 
   // Debounce search kecamatan
   useEffect(() => {
@@ -111,17 +164,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     try {
       const targetRegions = getTargetRegions();
 
-      if (timeRange === '30days') {
+      if (timeRange === 'historical') {
         const labelName = exportScope === 'kecamatan' ? selectedKecamatan.name : targetRegions[0]?.name;
-        setLoadingProgress(`Mengambil data historis 30 hari (${labelName})...`);
+        setLoadingProgress(`Mengambil data historis (${startDate} s/d ${endDate}) untuk ${labelName}...`);
         const histories = targetRegions.length === 1
-          ? [await fetch30DaysHistoryForRegion(targetRegions[0])]
-          : await fetch30DaysHistoryForMultipleRegions(targetRegions, (done, total) => {
+          ? [await fetchDateRangeHistoryForRegion(targetRegions[0], startDate, endDate)]
+          : await fetchDateRangeHistoryForMultipleRegions(targetRegions, startDate, endDate, (done, total) => {
               setLoadingProgress(`Mengambil data historis (${done}/${total} lokasi)...`);
             });
 
-        export30DaysToExcel(histories, exportScope === 'kecamatan' ? selectedKecamatan : selectedRegion);
-        setSuccessMessage('File Excel historis 30 hari (Lengkap Detail Per Tanggal) berhasil diunduh!');
+        exportHistoricalRangeToExcel(histories, exportScope === 'kecamatan' ? selectedKecamatan : selectedRegion, startDate, endDate);
+        setSuccessMessage(`File Excel periode ${startDate} s/d ${endDate} (${daysCount} hari) berhasil diunduh!`);
       } else {
         exportToExcel(
           targetRegions,
@@ -149,16 +202,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     try {
       const targetRegions = getTargetRegions();
 
-      if (timeRange === '30days') {
-        setLoadingProgress('Mengambil data historis 30 hari...');
+      if (timeRange === 'historical') {
+        setLoadingProgress(`Mengambil data historis (${startDate} s/d ${endDate})...`);
         const histories = targetRegions.length === 1
-          ? [await fetch30DaysHistoryForRegion(targetRegions[0])]
-          : await fetch30DaysHistoryForMultipleRegions(targetRegions, (done, total) => {
+          ? [await fetchDateRangeHistoryForRegion(targetRegions[0], startDate, endDate)]
+          : await fetchDateRangeHistoryForMultipleRegions(targetRegions, startDate, endDate, (done, total) => {
               setLoadingProgress(`Mengambil data historis (${done}/${total} lokasi)...`);
             });
 
-        export30DaysToCSV(histories, exportScope === 'kecamatan' ? selectedKecamatan : selectedRegion);
-        setSuccessMessage('File CSV historis 30 hari detail harian berhasil diunduh!');
+        exportHistoricalRangeToCSV(histories, exportScope === 'kecamatan' ? selectedKecamatan : selectedRegion, startDate, endDate);
+        setSuccessMessage(`File CSV periode ${startDate} s/d ${endDate} berhasil diunduh!`);
       } else {
         exportToCSV(targetRegions, rainfallDataMap);
         setSuccessMessage('File CSV berhasil diunduh!');
@@ -181,16 +234,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     try {
       const targetRegions = getTargetRegions();
 
-      if (timeRange === '30days') {
-        setLoadingProgress('Menyusun buletin historis 30 hari...');
+      if (timeRange === 'historical') {
+        setLoadingProgress(`Menyusun buletin historis (${startDate} s/d ${endDate})...`);
         const histories = targetRegions.length === 1
-          ? [await fetch30DaysHistoryForRegion(targetRegions[0])]
-          : await fetch30DaysHistoryForMultipleRegions(targetRegions, (done, total) => {
+          ? [await fetchDateRangeHistoryForRegion(targetRegions[0], startDate, endDate)]
+          : await fetchDateRangeHistoryForMultipleRegions(targetRegions, startDate, endDate, (done, total) => {
               setLoadingProgress(`Mengambil data historis (${done}/${total} lokasi)...`);
             });
 
-        export30DaysToPDF(histories, exportScope === 'kecamatan' ? selectedKecamatan : selectedRegion);
-        setSuccessMessage('Buletin PDF historis 30 hari berhasil diunduh!');
+        exportHistoricalRangeToPDF(histories, exportScope === 'kecamatan' ? selectedKecamatan : selectedRegion, startDate, endDate);
+        setSuccessMessage(`Buletin PDF periode ${startDate} s/d ${endDate} berhasil diunduh!`);
       } else {
         exportToPDF(
           targetRegions,
@@ -214,7 +267,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 my-8 animate-in fade-in zoom-in-95">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 my-6 animate-in fade-in zoom-in-95">
+        {/* Modal Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
@@ -222,7 +276,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-bold text-white">Ekspor Data Curah Hujan</h3>
-              <p className="text-xs text-slate-400">Unduh data per tanggal & pilih hingga level kecamatan</p>
+              <p className="text-xs text-slate-400">Pilih rentang tanggal kustom & cakupan kecamatan</p>
             </div>
           </div>
           <button
@@ -233,25 +287,25 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </button>
         </div>
 
-        {/* Time Range Selection */}
+        {/* Mode Rentang Waktu (Historis vs Live) */}
         <div className="space-y-1.5">
           <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
-            Pilihan Rentang Waktu Data:
+            Mode Data:
           </label>
           <div className="grid grid-cols-2 gap-2">
             <button
-              onClick={() => setTimeRange('30days')}
+              onClick={() => setTimeRange('historical')}
               className={`p-2.5 rounded-xl border text-left transition ${
-                timeRange === '30days'
+                timeRange === 'historical'
                   ? 'bg-cyan-950/90 border-cyan-500 text-white shadow-md'
                   : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:bg-slate-800'
               }`}
             >
               <div className="text-xs font-bold flex items-center gap-1.5 mb-0.5">
-                <Calendar className="w-3.5 h-3.5 text-emerald-400" />
-                30 Hari Terakhir
+                <CalendarRange className="w-3.5 h-3.5 text-emerald-400" />
+                Data Historis (Pilih Tanggal)
               </div>
-              <div className="text-[10px] text-slate-400">Detail rincian per tanggal (1 bulan)</div>
+              <div className="text-[10px] text-slate-400">Detail rincian per hari (bebas pilih tanggal)</div>
             </button>
 
             <button
@@ -266,10 +320,106 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 <Zap className="w-3.5 h-3.5 text-cyan-400" />
                 Real-Time & 7 Hari
               </div>
-              <div className="text-[10px] text-slate-400">Data live 24 jam & perkiraan cuaca</div>
+              <div className="text-[10px] text-slate-400">Data live 24 jam & prakiraan cuaca</div>
             </button>
           </div>
         </div>
+
+        {/* Custom Date Range Picker (Only when in historical mode) */}
+        {timeRange === 'historical' && (
+          <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-3 animate-in fade-in">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                Rentang Tanggal Pengamatan:
+              </label>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 font-medium">
+                {daysCount > 0 ? `${daysCount} Hari Terpilih` : 'Tanggal tidak valid'}
+              </span>
+            </div>
+
+            {/* Date Presets */}
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => applyPreset('30days')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition ${
+                  datePreset === '30days'
+                    ? 'bg-emerald-950 border-emerald-500 text-emerald-300 font-bold'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                30 Hari Terakhir
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('14days')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition ${
+                  datePreset === '14days'
+                    ? 'bg-emerald-950 border-emerald-500 text-emerald-300 font-bold'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                14 Hari Terakhir
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('7days')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition ${
+                  datePreset === '7days'
+                    ? 'bg-emerald-950 border-emerald-500 text-emerald-300 font-bold'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                7 Hari Terakhir
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('this_month')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition ${
+                  datePreset === 'this_month'
+                    ? 'bg-emerald-950 border-emerald-500 text-emerald-300 font-bold'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Bulan Ini (Tgl 1 - Sekarang)
+              </button>
+            </div>
+
+            {/* Start & End Date Inputs */}
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              <div className="space-y-1">
+                <label className="text-[11px] text-slate-400 block font-medium">
+                  Dari Tanggal:
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => {
+                    setStartDate(e.target.value);
+                    setDatePreset('custom');
+                  }}
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] text-slate-400 block font-medium">
+                  Sampai Tanggal:
+                </label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => {
+                    setEndDate(e.target.value);
+                    setDatePreset('custom');
+                  }}
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Scope Selection */}
         <div className="space-y-1.5">
@@ -421,20 +571,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         <div className="p-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-[11px] text-slate-300 flex items-center gap-2">
           <Calendar className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>
-            {timeRange === '30days'
-              ? `Laporan mencakup 30 baris detail tanggal per tanggal (presipitasi mm, status hujan BMKG, suhu maks/min, dan angin) untuk ${
+            {timeRange === 'historical'
+              ? `Laporan mencakup rincian ${daysCount} hari (${startDate} s/d ${endDate}) detail tanggal per tanggal untuk ${
                   exportScope === 'kecamatan' ? selectedKecamatan.name : exportScope === 'selected' ? selectedRegion.name : 'seluruh wilayah'
                 }.`
-              : 'Laporan mencakup data live pengamatan 24 jam terakhir dan perkiraan cuaca 7 hari.'}
+              : 'Laporan mencakup data live pengamatan 24 jam terakhir dan prakiraan cuaca 7 hari.'}
           </span>
         </div>
 
         {/* Export Buttons */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
-          {/* Excel Export Button */}
+        <div className="grid grid-cols-3 gap-2.5 pt-1">
           <button
             onClick={handleExportExcel}
-            disabled={isExporting}
+            disabled={isExporting || (timeRange === 'historical' && daysCount <= 0)}
             className="p-3 rounded-xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/60 to-slate-950 hover:border-emerald-400 text-left transition group shadow-lg disabled:opacity-50"
           >
             <div className="flex items-center justify-between mb-1.5">
@@ -447,14 +596,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
             <div className="font-bold text-white text-xs">Spreadsheet Excel</div>
             <p className="text-[10px] text-slate-400 mt-0.5">
-              {timeRange === '30days' ? 'Rekap, Detail Per Tgl & Matriks.' : 'Multi-sheet live & prakiraan.'}
+              {timeRange === 'historical' ? 'Rekap, Detail Per Tgl & Matriks.' : 'Multi-sheet live & prakiraan.'}
             </p>
           </button>
 
-          {/* CSV Export Button */}
           <button
             onClick={handleExportCSV}
-            disabled={isExporting}
+            disabled={isExporting || (timeRange === 'historical' && daysCount <= 0)}
             className="p-3 rounded-xl border border-teal-500/40 bg-gradient-to-br from-teal-950/60 to-slate-950 hover:border-teal-400 text-left transition group shadow-lg disabled:opacity-50"
           >
             <div className="flex items-center justify-between mb-1.5">
@@ -467,14 +615,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
             <div className="font-bold text-white text-xs">Data CSV</div>
             <p className="text-[10px] text-slate-400 mt-0.5">
-              {timeRange === '30days' ? 'Format baris per tanggal.' : 'Format ringkas analisis.'}
+              {timeRange === 'historical' ? 'Format baris per tanggal.' : 'Format ringkas analisis.'}
             </p>
           </button>
 
-          {/* PDF Export Button */}
           <button
             onClick={handleExportPDF}
-            disabled={isExporting}
+            disabled={isExporting || (timeRange === 'historical' && daysCount <= 0)}
             className="p-3 rounded-xl border border-rose-500/40 bg-gradient-to-br from-rose-950/60 to-slate-950 hover:border-rose-400 text-left transition group shadow-lg disabled:opacity-50"
           >
             <div className="flex items-center justify-between mb-1.5">
@@ -487,7 +634,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
             <div className="font-bold text-white text-xs">Buletin PDF</div>
             <p className="text-[10px] text-slate-400 mt-0.5">
-              {timeRange === '30days' ? 'Laporan harian resmi 30 hari.' : 'Dokumen resmi BMKG/EWS.'}
+              {timeRange === 'historical' ? 'Laporan harian resmi.' : 'Dokumen resmi BMKG/EWS.'}
             </p>
           </button>
         </div>
@@ -516,10 +663,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </div>
         )}
 
-        <div className="pt-1 flex justify-end">
+        <div className="pt-1 flex items-center justify-between border-t border-slate-800/80">
+          <span className="text-[10px] text-slate-500">Standar meteorologi BMKG/WMO presisi harian.</span>
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition"
+            className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition"
           >
             Tutup
           </button>
@@ -528,6 +676,3 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     </div>
   );
 };
-
-
-

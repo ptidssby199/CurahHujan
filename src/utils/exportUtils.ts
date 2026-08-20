@@ -385,15 +385,20 @@ export function exportToPDF(
 }
 
 // ----------------------------------------------------
-// EXPORT 30 HARI TERAKHIR (HISTORIS BULANAN)
+// EXPORT HISTORIS / RENTANG TANGGAL
 // ----------------------------------------------------
 
-export function export30DaysToExcel(
+export function exportHistoricalRangeToExcel(
   histories: MonthHistorySummary[],
-  selectedRegion?: Region
+  selectedRegion?: Region,
+  startDate?: string,
+  endDate?: string
 ) {
   const wb = XLSX.utils.book_new();
   const dateStr = new Date().toISOString().split('T')[0];
+  const sDate = startDate || histories[0]?.startDate || dateStr;
+  const eDate = endDate || histories[0]?.endDate || dateStr;
+  const periodLabel = `Periode_${sDate}_sd_${eDate}`;
 
   const safeAppendSheet = (workbook: XLSX.WorkBook, sheet: XLSX.WorkSheet, rawName: string) => {
     const cleanName = (rawName || 'Sheet')
@@ -404,14 +409,17 @@ export function export30DaysToExcel(
     XLSX.utils.book_append_sheet(workbook, sheet, cleanName);
   };
 
-  // Sheet 1: Rekap 30 Hari Seluruh Wilayah / Kecamatan
+  // Sheet 1: Rekap Seluruh Wilayah / Kecamatan
   const summaryRows = histories.map((h, idx) => ({
     No: idx + 1,
     'Wilayah / Kecamatan': h.regionName,
     Provinsi: h.province,
     Pulau: h.island,
     'Kode Stasiun': h.stationCode,
-    'Total Hujan 30 Hari (mm)': h.totalRainfall30d,
+    'Periode Awal': h.startDate || sDate,
+    'Periode Akhir': h.endDate || eDate,
+    'Total Hari': h.totalDays || h.dailyList.length,
+    'Total Akumulasi Hujan (mm)': h.totalRainfall30d,
     'Rata-rata Harian (mm/hari)': h.averageDailyRain,
     'Hujan Maksimum Harian (mm)': h.maxDailyRain,
     'Tanggal Hujan Maksimum': h.maxDailyRainDate,
@@ -424,7 +432,7 @@ export function export30DaysToExcel(
   }));
 
   const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
-  safeAppendSheet(wb, wsSummary, 'Rekap 30 Hari');
+  safeAppendSheet(wb, wsSummary, 'Rekap Periode');
 
   // Sheet 2: Detail Harian Per Tanggal (Semua Tanggal untuk Semua Wilayah/Kecamatan)
   const allDailyRows: any[] = [];
@@ -461,7 +469,7 @@ export function export30DaysToExcel(
         No: i + 1,
         'Wilayah / Kecamatan': h.regionName,
         Provinsi: h.province,
-        'Total 30 Hari (mm)': h.totalRainfall30d,
+        'Total Akumulasi (mm)': h.totalRainfall30d,
         'Rata-rata (mm)': h.averageDailyRain,
         'Maks Harian (mm)': h.maxDailyRain,
       };
@@ -478,7 +486,7 @@ export function export30DaysToExcel(
     safeAppendSheet(wb, wsMatrix, 'Matriks Curah Hujan');
   }
 
-  const fileName = `Rekap_Curah_Hujan_30_Hari_${dateStr}.xlsx`;
+  const fileName = `Rekap_Curah_Hujan_${periodLabel}.xlsx`;
 
   try {
     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
@@ -500,11 +508,19 @@ export function export30DaysToExcel(
   }
 }
 
-export function export30DaysToCSV(
+// Backwards compatibility
+export const export30DaysToExcel = exportHistoricalRangeToExcel;
+
+export function exportHistoricalRangeToCSV(
   histories: MonthHistorySummary[],
-  selectedRegion?: Region
+  selectedRegion?: Region,
+  startDate?: string,
+  endDate?: string
 ) {
   const dateStr = new Date().toISOString().split('T')[0];
+  const sDate = startDate || histories[0]?.startDate || dateStr;
+  const eDate = endDate || histories[0]?.endDate || dateStr;
+  const periodLabel = `Periode_${sDate}_sd_${eDate}`;
 
   const headers = [
     'No',
@@ -551,7 +567,7 @@ export function export30DaysToCSV(
   const a = document.createElement('a');
   a.style.display = 'none';
   a.href = url;
-  a.download = `Data_Historis_Curah_Hujan_30_Hari_${dateStr}.csv`;
+  a.download = `Data_Historis_Curah_Hujan_${periodLabel}.csv`;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => {
@@ -560,9 +576,14 @@ export function export30DaysToCSV(
   }, 500);
 }
 
-export function export30DaysToPDF(
+// Backwards compatibility
+export const export30DaysToCSV = exportHistoricalRangeToCSV;
+
+export function exportHistoricalRangeToPDF(
   histories: MonthHistorySummary[],
-  selectedRegion?: Region
+  selectedRegion?: Region,
+  startDate?: string,
+  endDate?: string
 ) {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -578,19 +599,23 @@ export function export30DaysToPDF(
     year: 'numeric',
   });
 
+  const sDate = startDate || histories[0]?.startDate || '';
+  const eDate = endDate || histories[0]?.endDate || '';
+  const periodText = sDate && eDate ? `Periode: ${sDate} s/d ${eDate}` : 'Periode Historis';
+
   // Header Banner
   doc.setFillColor(15, 23, 42); // slate-900
   doc.rect(0, 0, 210, 32, 'F');
 
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(14);
+  doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
-  doc.text('HUJAN NUSANTARA - BULETIN HISTORIS 30 HARI TERAKHIR', 14, 13);
+  doc.text(`HUJAN NUSANTARA - BULETIN HISTORIS (${periodText.toUpperCase()})`, 14, 13);
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(148, 163, 184);
-  doc.text(`Laporan Rekapitulasi Presipitasi & Dinamika Iklim Bulanan | Diterbitkan: ${dateFormatted}`, 14, 21);
+  doc.text(`Laporan Rekapitulasi Presipitasi & Dinamika Iklim | Diterbitkan: ${dateFormatted}`, 14, 21);
   doc.text('Sumber Data: Observasi Meteorologi Terpadu & Reanalisis Presipitasi', 14, 27);
 
   let yPos = 38;
@@ -608,12 +633,12 @@ export function export30DaysToPDF(
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
-    doc.text(`REKAPITULASI 30 HARI: ${targetHistory.regionName.toUpperCase()} (${targetHistory.province})`, 18, yPos + 8);
+    doc.text(`REKAPITULASI: ${targetHistory.regionName.toUpperCase()} (${targetHistory.province})`, 18, yPos + 8);
 
     doc.setFontSize(8.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(51, 65, 85);
-    const l1 = `Total Akumulasi 30 Hari: ${targetHistory.totalRainfall30d} mm | Rata-rata Harian: ${targetHistory.averageDailyRain} mm/hari`;
+    const l1 = `Total Akumulasi: ${targetHistory.totalRainfall30d} mm (${targetHistory.totalDays || targetHistory.dailyList.length} Hari) | Rata-rata: ${targetHistory.averageDailyRain} mm/hari`;
     const l2 = `Hujan Harian Tertinggi: ${targetHistory.maxDailyRain} mm (Tanggal ${targetHistory.maxDailyRainDate})`;
     const l3 = `Jumlah Hari Hujan: ${targetHistory.rainyDaysCount} Hari | Hari Lebat (≥20mm): ${targetHistory.heavyRainDaysCount} Hari | Hari Ekstrem (≥50mm): ${targetHistory.extremeRainDaysCount} Hari`;
     doc.text(l1, 18, yPos + 15);
@@ -626,7 +651,7 @@ export function export30DaysToPDF(
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
-    doc.text('RINCIAN CURAH HUJAN HARIAN (30 HARI TERAKHIR)', 14, yPos);
+    doc.text(`RINCIAN CURAH HUJAN HARIAN (${periodText.toUpperCase()})`, 14, yPos);
     yPos += 4;
 
     const tableData = targetHistory.dailyList.map((d, i) => [
@@ -672,7 +697,7 @@ export function export30DaysToPDF(
     doc.setFontSize(10.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
-    doc.text('REKAPITULASI CURAH HUJAN 30 HARI SE-INDONESIA', 14, yPos);
+    doc.text(`REKAPITULASI CURAH HUJAN SE-INDONESIA (${periodText.toUpperCase()})`, 14, yPos);
     yPos += 4;
 
     const tableData = histories.map((h, i) => [
@@ -689,7 +714,7 @@ export function export30DaysToPDF(
 
     autoTable(doc, {
       startY: yPos,
-      head: [['No', 'Wilayah', 'Provinsi', 'Total 30 Hari', 'Rata-Rata', 'Harian Maks', 'Hari Hujan', 'Hari Lebat', 'Hari Ekstrem']],
+      head: [['No', 'Wilayah', 'Provinsi', 'Total Periode', 'Rata-Rata', 'Harian Maks', 'Hari Hujan', 'Hari Lebat', 'Hari Ekstrem']],
       body: tableData,
       theme: 'grid',
       headStyles: {
@@ -731,6 +756,10 @@ export function export30DaysToPDF(
     );
   }
 
-  doc.save(`Laporan_Historis_30_Hari_${now.toISOString().split('T')[0]}.pdf`);
+  const s = sDate ? `_${sDate}_sd_${eDate}` : `_${now.toISOString().split('T')[0]}`;
+  doc.save(`Laporan_Historis_Curah_Hujan${s}.pdf`);
 }
+
+// Backwards compatibility
+export const export30DaysToPDF = exportHistoricalRangeToPDF;
 

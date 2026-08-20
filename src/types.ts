@@ -125,6 +125,9 @@ export interface MonthHistorySummary {
   rainyDaysCount: number;
   heavyRainDaysCount: number;
   extremeRainDaysCount: number;
+  startDate?: string;
+  endDate?: string;
+  totalDays?: number;
   dailyList: HistoricalDailyData[];
 }
 

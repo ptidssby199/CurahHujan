@@ -363,12 +363,29 @@ export function playEWSAlertSound(severity: AlertSeverity = 'siaga') {
   }
 }
 
-// Fetch 30 Days Historical Weather & Rainfall Data
-export async function fetch30DaysHistoryForRegion(region: Region): Promise<MonthHistorySummary> {
+// Fetch Historical Weather & Rainfall Data for arbitrary or 30-day date ranges
+export async function fetchDateRangeHistoryForRegion(
+  region: Region,
+  startDate?: string,
+  endDate?: string
+): Promise<MonthHistorySummary> {
   const tzParam = region.timezone === 'WIT' ? 'Asia%2FJayapura' : region.timezone === 'WITA' ? 'Asia%2FMakassar' : 'Asia%2FJakarta';
+  
+  let dateQuery = 'past_days=30&forecast_days=1';
+  if (startDate && endDate) {
+    dateQuery = `start_date=${startDate}&end_date=${endDate}`;
+  }
+
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${region.lat}&longitude=${region.lng}&daily=weather_code,precipitation_sum,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&past_days=30&forecast_days=1&timezone=${tzParam}`;
-    const res = await fetch(url);
+    let url = `https://api.open-meteo.com/v1/forecast?latitude=${region.lat}&longitude=${region.lng}&daily=weather_code,precipitation_sum,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&${dateQuery}&timezone=${tzParam}`;
+    let res = await fetch(url);
+    
+    // If forecast API rejected older historical dates, fallback to archive API
+    if (!res.ok && startDate && endDate) {
+      const archiveUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${region.lat}&longitude=${region.lng}&daily=weather_code,precipitation_sum,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&start_date=${startDate}&end_date=${endDate}&timezone=${tzParam}`;
+      res = await fetch(archiveUrl);
+    }
+
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     const daily = json.daily || {};
@@ -428,6 +445,9 @@ export async function fetch30DaysHistoryForRegion(region: Region): Promise<Month
       });
     }
 
+    const actualStart = times[0] || startDate || '';
+    const actualEnd = times[times.length - 1] || endDate || '';
+
     return {
       regionId: region.id,
       regionName: region.name,
@@ -444,15 +464,27 @@ export async function fetch30DaysHistoryForRegion(region: Region): Promise<Month
       rainyDaysCount: rainyDays,
       heavyRainDaysCount: heavyRainDays,
       extremeRainDaysCount: extremeRainDays,
+      startDate: actualStart,
+      endDate: actualEnd,
+      totalDays: dailyList.length,
       dailyList,
     };
   } catch (err) {
-    console.warn(`Fallback 30d simulation for ${region.name}:`, err);
-    return generateFallback30DaysHistory(region);
+    console.warn(`Fallback simulation for ${region.name}:`, err);
+    return generateFallbackDateRangeHistory(region, startDate, endDate);
   }
 }
 
-function generateFallback30DaysHistory(region: Region): MonthHistorySummary {
+// Backwards-compatible 30 days wrapper
+export async function fetch30DaysHistoryForRegion(region: Region): Promise<MonthHistorySummary> {
+  return fetchDateRangeHistoryForRegion(region);
+}
+
+function generateFallbackDateRangeHistory(
+  region: Region,
+  startDate?: string,
+  endDate?: string
+): MonthHistorySummary {
   const seed = region.lat * 100 + region.lng * 10;
   const elevationFactor = region.elevationMeters > 200 ? 1.4 : 1.0;
   const dailyList: HistoricalDailyData[] = [];
@@ -463,9 +495,20 @@ function generateFallback30DaysHistory(region: Region): MonthHistorySummary {
   let heavyRainDays = 0;
   let extremeRainDays = 0;
 
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
+  let daysCount = 30;
+  let startD = new Date();
+  if (startDate && endDate) {
+    const s = new Date(startDate);
+    const e = new Date(endDate);
+    daysCount = Math.max(1, Math.min(90, Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1));
+    startD = s;
+  } else {
+    startD.setDate(startD.getDate() - 29);
+  }
+
+  for (let i = 0; i < daysCount; i++) {
+    const d = new Date(startD);
+    d.setDate(d.getDate() + i);
     const dateStr = d.toISOString().split('T')[0];
     const dayName = INDONESIAN_DAYS[d.getDay()];
 
@@ -529,16 +572,21 @@ function generateFallback30DaysHistory(region: Region): MonthHistorySummary {
     totalRainfall30d: Number(totalRain.toFixed(1)),
     maxDailyRain: Number(maxRain.toFixed(1)),
     maxDailyRainDate: maxRainDate,
-    averageDailyRain: Number((totalRain / 30).toFixed(1)),
+    averageDailyRain: dailyList.length > 0 ? Number((totalRain / dailyList.length).toFixed(1)) : 0,
     rainyDaysCount: rainyDays,
     heavyRainDaysCount: heavyRainDays,
     extremeRainDaysCount: extremeRainDays,
+    startDate: dailyList[0]?.date || startDate || '',
+    endDate: dailyList[dailyList.length - 1]?.date || endDate || '',
+    totalDays: dailyList.length,
     dailyList,
   };
 }
 
-export async function fetch30DaysHistoryForMultipleRegions(
+export async function fetchDateRangeHistoryForMultipleRegions(
   regions: Region[],
+  startDate?: string,
+  endDate?: string,
   onProgress?: (completed: number, total: number) => void
 ): Promise<MonthHistorySummary[]> {
   const results: MonthHistorySummary[] = [];
@@ -546,7 +594,7 @@ export async function fetch30DaysHistoryForMultipleRegions(
   
   for (let i = 0; i < regions.length; i += BATCH_SIZE) {
     const chunk = regions.slice(i, i + BATCH_SIZE);
-    const chunkResults = await Promise.all(chunk.map((r) => fetch30DaysHistoryForRegion(r)));
+    const chunkResults = await Promise.all(chunk.map((r) => fetchDateRangeHistoryForRegion(r, startDate, endDate)));
     results.push(...chunkResults);
     if (onProgress) {
       onProgress(results.length, regions.length);
@@ -554,6 +602,13 @@ export async function fetch30DaysHistoryForMultipleRegions(
   }
 
   return results;
+}
+
+export async function fetch30DaysHistoryForMultipleRegions(
+  regions: Region[],
+  onProgress?: (completed: number, total: number) => void
+): Promise<MonthHistorySummary[]> {
+  return fetchDateRangeHistoryForMultipleRegions(regions, undefined, undefined, onProgress);
 }
 
 // Preset popular Kecamatans across Indonesia for instant selection
